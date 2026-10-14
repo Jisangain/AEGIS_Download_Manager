@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Aegis Download Manager",
+  "version": "1.0.0",
+  "description": "Fast, license-free download capture for Aegis Download Manager.",
+  "permissions": [
+    "nativeMessaging",
+    "contextMenus",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Aegis Download Manager"
+  }
+}

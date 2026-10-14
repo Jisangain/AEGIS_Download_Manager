@@ -1,0 +1,86 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- Virtual environments ----
+.venv/
+venv/
+venv*/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ---- Environment / secrets / local config ----
+.env
+.env.*
+!.env.example
+*.local
+*.local.*
+
+# ---- Local data (SQLite DB, logs, downloads) ----
+# The app stores its DB in %APPDATA%, but ignore any stray local copies
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# ---- PyInstaller / packaging artifacts ----
+*.manifest
+*.spec
+*.exe
+*.pdb
+*.zip
+
+# ---- Test / scratch ----
+test_cli/
+test_pkg_dl/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Node (browser extension) ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+web-ext-artifacts/
+*.crx
+*.pem
