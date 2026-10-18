@@ -8,6 +8,7 @@ import sys
 import subprocess
 import urllib.parse
 import threading
+import shutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from PyQt6.QtWidgets import (
@@ -101,7 +102,7 @@ def style_progress_bar(pbar: QProgressBar, status: str):
     if s == "completed":
         chunk_color = "#10B981"
     elif s == "downloading":
-        chunk_color = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2563EB, stop:1 #38BDF8)"
+        chunk_color = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #007AFF, stop:1 #38BDF8)"
     elif s == "paused":
         chunk_color = "#F59E0B"
     elif s == "scheduled":
@@ -113,19 +114,19 @@ def style_progress_bar(pbar: QProgressBar, status: str):
 
     pbar.setStyleSheet(f"""
         QProgressBar {{
-            background-color: #1E2128;
-            border: 1px solid #2B2F3A;
-            border-radius: 4px;
+            background-color: #18181B;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
             text-align: center;
             color: #FFFFFF;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 600;
-            min-height: 18px;
-            max-height: 18px;
+            min-height: 16px;
+            max-height: 16px;
         }}
         QProgressBar::chunk {{
             background: {chunk_color};
-            border-radius: 3px;
+            border-radius: 5px;
         }}
     """)
 
@@ -144,14 +145,14 @@ def format_download_date(date_str: str) -> str:
 DARK_STYLESHEET = """
 QWidget {
     color: #F1F5F9;
-    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
-    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
 }
 QMainWindow, QDialog {
-    background-color: #121316;
+    background-color: #18181B;
     color: #F1F5F9;
-    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
-    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
 }
 QLabel {
     color: #F1F5F9;
@@ -159,188 +160,215 @@ QLabel {
     font-size: 12px;
 }
 QCheckBox {
-    color: #F1F5F9;
+    color: #CBD5E1;
     background-color: transparent;
     spacing: 8px;
     font-size: 12px;
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 1px solid #3F4452;
+    width: 15px;
+    height: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 4px;
-    background-color: #1A1C22;
+    background-color: rgba(0, 0, 0, 0.35);
 }
 QCheckBox::indicator:hover {
-    border: 1px solid #3B82F6;
-    background-color: #22252E;
+    border: 1px solid #007AFF;
+    background-color: rgba(255, 255, 255, 0.08);
 }
 QCheckBox::indicator:checked {
-    background-color: #2563EB;
-    border: 1px solid #3B82F6;
-}
-QRadioButton {
-    color: #F1F5F9;
-    background-color: transparent;
-    spacing: 8px;
-    font-size: 12px;
+    background-color: #007AFF;
+    border: 1px solid #0062CC;
 }
 QGroupBox {
     color: #F1F5F9;
-    border: 1px solid #2B2F3A;
-    border-radius: 6px;
-    margin-top: 10px;
-    padding-top: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    background-color: rgba(24, 24, 27, 0.5);
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 0 5px;
-    color: #38BDF8;
+    padding: 0 6px;
+    color: #007AFF;
     font-weight: 600;
 }
 QToolBar {
-    background-color: #18191E;
-    border-bottom: 1px solid #262932;
-    padding: 6px 10px;
-    spacing: 6px;
+    background-color: #242429;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 6px 12px;
+    spacing: 5px;
 }
 QToolButton {
     background-color: transparent;
-    color: #F1F5F9;
-    padding: 6px 12px;
-    border-radius: 6px;
+    color: #CBD5E1;
+    padding: 5px 12px;
+    border-radius: 8px;
     font-weight: 500;
     font-size: 12px;
+    border: 1px solid transparent;
 }
 QToolButton:hover {
-    background-color: #272A34;
+    background-color: rgba(255, 255, 255, 0.08);
     color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }
 QToolButton:pressed {
-    background-color: #1D4ED8;
+    background-color: #0062CC;
     color: #FFFFFF;
 }
+QToolButton:checked {
+    background-color: rgba(0, 122, 255, 0.2);
+    color: #60A5FA;
+    border: 1px solid rgba(0, 122, 255, 0.35);
+}
 QToolButton:disabled {
-    color: #4B5263;
+    color: #475569;
     background-color: transparent;
 }
 QListWidget {
-    background-color: #16171B;
+    background-color: #1E1E23;
     border: none;
-    border-right: 1px solid #262932;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
     color: #94A3B8;
-    padding: 8px 6px;
-    font-size: 13px;
+    padding: 8px 8px;
+    font-size: 12px;
 }
 QListWidget::item {
-    padding: 9px 12px;
-    border-radius: 6px;
-    margin: 2px 2px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    margin: 2px 0px;
     font-weight: 500;
 }
 QListWidget::item:selected {
-    background-color: #2563EB;
+    background-color: #007AFF;
     color: #FFFFFF;
     font-weight: 600;
 }
 QListWidget::item:hover:!selected {
-    background-color: #22252D;
+    background-color: rgba(255, 255, 255, 0.05);
     color: #F1F5F9;
 }
 QTableWidget {
-    background-color: #121316;
-    alternate-background-color: #16171C;
-    border: none;
-    gridline-color: #1E2129;
+    background-color: #1E1E23;
+    alternate-background-color: #242429;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    gridline-color: rgba(255, 255, 255, 0.04);
     color: #F1F5F9;
-    selection-background-color: #1E3A8A;
+    selection-background-color: rgba(0, 122, 255, 0.3);
     selection-color: #FFFFFF;
     font-size: 12px;
 }
 QTableWidget::item {
-    padding: 4px 8px;
-    border-bottom: 1px solid #1B1E26;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 QTableWidget::item:selected {
-    background-color: #1E3A8A;
+    background-color: rgba(0, 122, 255, 0.35);
     color: #FFFFFF;
 }
 QHeaderView::section {
-    background-color: #18191E;
+    background-color: #18181B;
     color: #94A3B8;
     padding: 8px 10px;
     border: none;
-    border-bottom: 1px solid #262932;
-    border-right: 1px solid #1F222A;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
     font-weight: 600;
-    font-size: 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+QHeaderView::section:hover {
+    background-color: #242429;
+    color: #F8FAFC;
+}
+QSplitter::handle:horizontal {
+    width: 3px;
+    background-color: rgba(255, 255, 255, 0.06);
+}
+QSplitter::handle:horizontal:hover {
+    background-color: #007AFF;
 }
 QLineEdit, QComboBox, QSpinBox, QDateTimeEdit {
-    background-color: #1A1C22;
-    border: 1px solid #2F333E;
-    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
     padding: 6px 10px;
     color: #F8FAFC;
     font-size: 12px;
 }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateTimeEdit:focus {
-    border: 1px solid #3B82F6;
-    background-color: #20222A;
+    border: 1px solid #007AFF;
+    background-color: rgba(0, 0, 0, 0.55);
 }
 QPushButton {
-    background-color: #2563EB;
+    background-color: #007AFF;
     color: #FFFFFF;
     border: none;
-    border-radius: 6px;
-    padding: 7px 16px;
+    border-radius: 8px;
+    padding: 6px 14px;
     font-weight: 500;
     font-size: 12px;
 }
 QPushButton:hover {
-    background-color: #1D4ED8;
+    background-color: #0062CC;
 }
 QPushButton:pressed {
-    background-color: #1E40AF;
+    background-color: #0051A8;
 }
 QPushButton:disabled {
-    background-color: #262830;
-    color: #64748B;
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #475569;
 }
 QMenu {
-    background-color: #1E2026;
-    border: 1px solid #2E323D;
-    border-radius: 6px;
+    background-color: #242429;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
     padding: 4px;
     color: #E2E8F0;
     font-size: 12px;
 }
 QMenu::item {
-    padding: 6px 24px 6px 12px;
-    border-radius: 4px;
+    padding: 6px 20px 6px 12px;
+    border-radius: 6px;
 }
 QMenu::item:selected {
-    background-color: #2563EB;
+    background-color: #007AFF;
     color: #FFFFFF;
 }
 QMenu::item:disabled {
-    color: #555C6E;
+    color: #475569;
 }
 QMenu::separator {
     height: 1px;
-    background-color: #2D313B;
+    background-color: rgba(255, 255, 255, 0.08);
     margin: 4px 6px;
 }
 QStatusBar {
-    background-color: #16171B;
-    border-top: 1px solid #262932;
+    background-color: #18181B;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     color: #94A3B8;
-    font-size: 12px;
-    padding: 3px 8px;
+    font-size: 11px;
+    padding: 3px 10px;
 }
 QSplitter::handle {
-    background-color: #262932;
+    background-color: rgba(255, 255, 255, 0.06);
     width: 1px;
+}
+QProgressBar {
+    background-color: #18181B;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    text-align: center;
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 600;
+    min-height: 16px;
+    max-height: 16px;
 }
 """
 
@@ -1475,6 +1503,8 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         self.db = Database()
         self.active_workers: Dict[int, Any] = {}
+        self._worker_speeds: Dict[int, str] = {}
+        self.active_inspector_id: Optional[int] = None
         self.current_filter = "All"
         self._last_clipboard_url = ""
 
@@ -1578,6 +1608,11 @@ class MainWindow(QMainWindow):
         self.settings_act.triggered.connect(self._open_settings)
         toolbar.addAction(self.settings_act)
 
+        self.inspector_act = QAction("Inspector", self, checkable=True)
+        self.inspector_act.setToolTip("Toggle macOS download details drawer")
+        self.inspector_act.toggled.connect(self._toggle_inspector_action)
+        toolbar.addAction(self.inspector_act)
+
         # Splitter Layout: Sidebar + Table Container
         central = QWidget()
         self.setCentralWidget(central)
@@ -1586,12 +1621,27 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
 
-        # Sidebar Filter List
+        # macOS Left Sidebar Container (Navigation + Disk Usage)
+        sidebar_container = QWidget()
+        sidebar_container.setMinimumWidth(160)
+        sidebar_container.setMaximumWidth(360)
+        sidebar_container.setStyleSheet("background-color: #1E1E23; border-right: 1px solid rgba(255, 255, 255, 0.08);")
+        sidebar_layout = QVBoxLayout(sidebar_container)
+        sidebar_layout.setContentsMargins(8, 10, 8, 10)
+        sidebar_layout.setSpacing(10)
+
+        # Transfers Section Label
+        lbl_transfers = QLabel("TRANSFERS")
+        lbl_transfers.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700; letter-spacing: 0.8px; padding-left: 8px;")
+        sidebar_layout.addWidget(lbl_transfers)
+
+        # Sidebar Filter List (Transfers + Categories)
         self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(195)
+        self.sidebar.setStyleSheet("background-color: transparent; border: none; padding: 0px;")
         self.category_defs = [
-            ("All", "All"),
+            ("All Downloads", "All"),
             ("Downloading", "Downloading"),
             ("Completed", "Completed"),
             ("Paused", "Paused"),
@@ -1608,7 +1658,62 @@ class MainWindow(QMainWindow):
             self.sidebar.addItem(item)
         self.sidebar.setCurrentRow(0)
         self.sidebar.currentRowChanged.connect(self._on_category_changed)
-        splitter.addWidget(self.sidebar)
+        sidebar_layout.addWidget(self.sidebar, stretch=1)
+
+        # macOS Storage Disk Usage Widget at bottom of sidebar
+        self.disk_card = QFrame()
+        self.disk_card.setStyleSheet("""
+            QFrame {
+                background-color: rgba(0, 0, 0, 0.35);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 10px;
+                padding: 4px;
+            }
+        """)
+        disk_vbox = QVBoxLayout(self.disk_card)
+        disk_vbox.setContentsMargins(10, 8, 10, 8)
+        disk_vbox.setSpacing(6)
+
+        disk_top = QHBoxLayout()
+        self.disk_name_lbl = QLabel("Local Storage")
+        self.disk_name_lbl.setStyleSheet("color: #E2E8F0; font-size: 11px; font-weight: 600;")
+        self.disk_ratio_lbl = QLabel("-- / -- GB")
+        self.disk_ratio_lbl.setStyleSheet("color: #94A3B8; font-size: 10px; font-family: monospace;")
+        disk_top.addWidget(self.disk_name_lbl)
+        disk_top.addStretch()
+        disk_top.addWidget(self.disk_ratio_lbl)
+        disk_vbox.addLayout(disk_top)
+
+        self.disk_bar = QProgressBar()
+        self.disk_bar.setRange(0, 100)
+        self.disk_bar.setTextVisible(False)
+        self.disk_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: rgba(255, 255, 255, 0.08);
+                border: none;
+                border-radius: 3px;
+                min-height: 5px;
+                max-height: 5px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #007AFF, stop:1 #6366F1);
+                border-radius: 3px;
+            }
+        """)
+        disk_vbox.addWidget(self.disk_bar)
+
+        disk_bot = QHBoxLayout()
+        self.disk_free_lbl = QLabel("Free: -- GB")
+        self.disk_free_lbl.setStyleSheet("color: #64748B; font-size: 10px;")
+        self.disk_speed_lbl = QLabel("Speed: Unlimited")
+        self.disk_speed_lbl.setStyleSheet("color: #007AFF; font-size: 10px; font-weight: 600;")
+        disk_bot.addWidget(self.disk_free_lbl)
+        disk_bot.addStretch()
+        disk_bot.addWidget(self.disk_speed_lbl)
+        disk_vbox.addLayout(disk_bot)
+
+        sidebar_layout.addWidget(self.disk_card)
+        splitter.addWidget(sidebar_container)
 
         # Table Container (Header Bar + Stacked Table/Empty State)
         table_container = QWidget()
@@ -1616,18 +1721,50 @@ class MainWindow(QMainWindow):
         table_vbox.setContentsMargins(12, 10, 12, 10)
         table_vbox.setSpacing(8)
 
-        # Header Bar above table
+        # Header Bar above table with Title, Count Badge, Quick Multi-Actions, and Search
         hdr_layout = QHBoxLayout()
         self.view_title_lbl = QLabel("All Downloads")
-        self.view_title_lbl.setStyleSheet("font-size: 15px; font-weight: 600; color: #F8FAFC;")
+        self.view_title_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #F8FAFC;")
         hdr_layout.addWidget(self.view_title_lbl)
+
+        self.count_badge_lbl = QLabel("0 items")
+        self.count_badge_lbl.setStyleSheet("""
+            QLabel {
+                background-color: rgba(255, 255, 255, 0.08);
+                color: #94A3B8;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 6px;
+                padding: 2px 7px;
+                font-size: 11px;
+                font-family: monospace;
+            }
+        """)
+        hdr_layout.addWidget(self.count_badge_lbl)
+        hdr_layout.addSpacing(10)
+
+        # Quick Actions
+        self.hdr_start_btn = QPushButton("Start")
+        self.hdr_start_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 0.08); color: #F1F5F9; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 4px 10px; font-size: 11px; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }")
+        self.hdr_start_btn.clicked.connect(self._resume_selected)
+        hdr_layout.addWidget(self.hdr_start_btn)
+
+        self.hdr_pause_btn = QPushButton("Pause")
+        self.hdr_pause_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 0.08); color: #F1F5F9; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 4px 10px; font-size: 11px; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }")
+        self.hdr_pause_btn.clicked.connect(self._pause_selected)
+        hdr_layout.addWidget(self.hdr_pause_btn)
+
+        self.hdr_folder_btn = QPushButton("Folder")
+        self.hdr_folder_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 0.08); color: #F1F5F9; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 4px 10px; font-size: 11px; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }")
+        self.hdr_folder_btn.clicked.connect(self._open_selected_folder)
+        hdr_layout.addWidget(self.hdr_folder_btn)
+
         hdr_layout.addStretch()
 
         # Real-time search filter
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter downloads by name or URL...")
+        self.search_input.setPlaceholderText("Filter transfers...")
         self.search_input.setClearButtonEnabled(True)
-        self.search_input.setFixedWidth(270)
+        self.search_input.setFixedWidth(240)
         self.search_input.textChanged.connect(self._on_search_changed)
         hdr_layout.addWidget(self.search_input)
         table_vbox.addLayout(hdr_layout)
@@ -1638,7 +1775,7 @@ class MainWindow(QMainWindow):
         # Main Table Widget
         self.table = QTableWidget()
         self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(["#", "File Name", "Size", "Progress", "Speed", "ETA", "Status", "Download Date"])
+        self.table.setHorizontalHeaderLabels(["#", "File Name", "Size", "Progress", "Speed", "ETA", "Status", "Date Added"])
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -1647,25 +1784,24 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.cellDoubleClicked.connect(self._on_double_click)
+        self.table.cellClicked.connect(self._on_table_cell_clicked)
         self.table.itemSelectionChanged.connect(self._update_action_states)
 
-        # Header section modes & default widths
+        # Header section modes & default widths - Interactive mouse drag resizing and moving
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setSectionsMovable(True)
+        header.setCascadingSectionResizes(True)
+        header.setHighlightSections(False)
+
         self.table.setColumnWidth(0, 46)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(1, 260)
         self.table.setColumnWidth(2, 145)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(3, 215)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(3, 190)
         self.table.setColumnWidth(4, 95)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 75)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(6, 110)
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(7, 125)
+        self.table.setColumnWidth(7, 130)
         self.stack.addWidget(self.table)
 
         # Empty State Overlay Widget
@@ -1692,9 +1828,169 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.empty_widget)
 
         table_vbox.addWidget(self.stack)
+
+        # macOS Summary Metric Bar above Status Bar
+        self.summary_footer = QFrame()
+        self.summary_footer.setStyleSheet("""
+            QFrame {
+                background-color: rgba(24, 24, 27, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                padding: 3px 8px;
+            }
+        """)
+        summary_layout = QHBoxLayout(self.summary_footer)
+        summary_layout.setContentsMargins(10, 4, 10, 4)
+
+        self.sum_total_lbl = QLabel("Total: 0 B")
+        self.sum_total_lbl.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        self.sum_dl_lbl = QLabel("Downloaded: 0 B")
+        self.sum_dl_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 600;")
+        self.sum_speed_lbl = QLabel("Speed: 0 KB/s")
+        self.sum_speed_lbl.setStyleSheet("color: #007AFF; font-size: 11px; font-weight: 600; font-family: monospace;")
+        self.sum_conns_lbl = QLabel("Active Sockets: 0")
+        self.sum_conns_lbl.setStyleSheet("color: #A78BFA; font-size: 11px; font-family: monospace;")
+
+        summary_layout.addWidget(self.sum_total_lbl)
+        summary_layout.addSpacing(16)
+        summary_layout.addWidget(self.sum_dl_lbl)
+        summary_layout.addStretch()
+        summary_layout.addWidget(self.sum_speed_lbl)
+        summary_layout.addSpacing(16)
+        summary_layout.addWidget(self.sum_conns_lbl)
+
+        table_vbox.addWidget(self.summary_footer)
+
         splitter.addWidget(table_container)
 
-        splitter.setSizes([195, 885])
+        # macOS Right Inspector / Details Panel
+        self.inspector_panel = QWidget()
+        self.inspector_panel.setFixedWidth(290)
+        self.inspector_panel.setStyleSheet("""
+            QWidget {
+                background-color: #1E1E23;
+                border-left: 1px solid rgba(255, 255, 255, 0.08);
+            }
+        """)
+        insp_layout = QVBoxLayout(self.inspector_panel)
+        insp_layout.setContentsMargins(12, 10, 12, 10)
+        insp_layout.setSpacing(10)
+
+        # Header with title and close button
+        insp_hdr = QHBoxLayout()
+        insp_title = QLabel("Download Details")
+        insp_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #F1F5F9; border: none;")
+        self.insp_close_btn = QPushButton("✕")
+        self.insp_close_btn.setFixedSize(22, 22)
+        self.insp_close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 11px;
+                color: #94A3B8;
+                font-size: 10px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.15);
+                color: #FFFFFF;
+            }
+        """)
+        self.insp_close_btn.clicked.connect(self._close_inspector)
+        insp_hdr.addWidget(insp_title)
+        insp_hdr.addStretch()
+        insp_hdr.addWidget(self.insp_close_btn)
+        insp_layout.addLayout(insp_hdr)
+
+        # File Card
+        file_card = QFrame()
+        file_card.setStyleSheet("background-color: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px;")
+        file_card_vbox = QVBoxLayout(file_card)
+        file_card_vbox.setContentsMargins(10, 8, 10, 8)
+        file_card_vbox.setSpacing(4)
+        self.insp_fn_lbl = QLabel("No Selection")
+        self.insp_fn_lbl.setWordWrap(True)
+        self.insp_fn_lbl.setStyleSheet("font-size: 12px; font-weight: 600; color: #F8FAFC; border: none;")
+        self.insp_cat_lbl = QLabel("CATEGORY: --")
+        self.insp_cat_lbl.setStyleSheet("font-size: 10px; font-weight: 700; color: #64748B; border: none; letter-spacing: 0.5px;")
+        file_card_vbox.addWidget(self.insp_fn_lbl)
+        file_card_vbox.addWidget(self.insp_cat_lbl)
+        insp_layout.addWidget(file_card)
+
+        # Transfer Metrics Card
+        metrics_hdr = QLabel("TRANSFER METRICS")
+        metrics_hdr.setStyleSheet("font-size: 10px; font-weight: 700; color: #64748B; border: none; letter-spacing: 0.6px;")
+        insp_layout.addWidget(metrics_hdr)
+
+        metrics_card = QFrame()
+        metrics_card.setStyleSheet("background-color: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px;")
+        m_vbox = QVBoxLayout(metrics_card)
+        m_vbox.setContentsMargins(10, 8, 10, 8)
+        m_vbox.setSpacing(6)
+
+        def make_metric_row(label_text: str):
+            r = QHBoxLayout()
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("color: #94A3B8; font-size: 11px; border: none;")
+            val = QLabel("--")
+            val.setStyleSheet("color: #F1F5F9; font-size: 11px; font-family: monospace; border: none;")
+            r.addWidget(lbl)
+            r.addStretch()
+            r.addWidget(val)
+            m_vbox.addLayout(r)
+            return val
+
+        self.insp_dl_val = make_metric_row("Downloaded:")
+        self.insp_pct_val = make_metric_row("Percentage:")
+        self.insp_speed_val = make_metric_row("Current Speed:")
+        self.insp_eta_val = make_metric_row("Estimated Time:")
+        self.insp_sockets_val = make_metric_row("Sockets / Threads:")
+        self.insp_status_val = make_metric_row("Status:")
+        insp_layout.addWidget(metrics_card)
+
+        # Source & Location Card
+        loc_hdr = QLabel("SOURCE & LOCATION")
+        loc_hdr.setStyleSheet("font-size: 10px; font-weight: 700; color: #64748B; border: none; letter-spacing: 0.6px;")
+        insp_layout.addWidget(loc_hdr)
+
+        loc_card = QFrame()
+        loc_card.setStyleSheet("background-color: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px;")
+        l_vbox = QVBoxLayout(loc_card)
+        l_vbox.setContentsMargins(10, 8, 10, 8)
+        l_vbox.setSpacing(6)
+
+        url_lbl = QLabel("URL:")
+        url_lbl.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 600; border: none;")
+        self.insp_url_edit = QLineEdit()
+        self.insp_url_edit.setReadOnly(True)
+        self.insp_url_edit.setStyleSheet("background-color: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; color: #38BDF8; font-size: 10px; font-family: monospace; padding: 4px;")
+        l_vbox.addWidget(url_lbl)
+        l_vbox.addWidget(self.insp_url_edit)
+
+        path_lbl = QLabel("Save Path:")
+        path_lbl.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 600; border: none;")
+        self.insp_path_edit = QLineEdit()
+        self.insp_path_edit.setReadOnly(True)
+        self.insp_path_edit.setStyleSheet("background-color: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; color: #CBD5E1; font-size: 10px; font-family: monospace; padding: 4px;")
+        l_vbox.addWidget(path_lbl)
+        l_vbox.addWidget(self.insp_path_edit)
+        insp_layout.addWidget(loc_card)
+
+        # Quick Actions inside Inspector
+        insp_layout.addStretch()
+        self.insp_copy_btn = QPushButton("Copy Download Link")
+        self.insp_copy_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 0.08); color: #F1F5F9; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 6px; font-size: 11px; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }")
+        self.insp_copy_btn.clicked.connect(self._copy_selected_url)
+        insp_layout.addWidget(self.insp_copy_btn)
+
+        self.insp_finder_btn = QPushButton("Show in Explorer")
+        self.insp_finder_btn.setStyleSheet("QPushButton { background-color: rgba(255, 255, 255, 0.08); color: #F1F5F9; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 6px; font-size: 11px; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.15); }")
+        self.insp_finder_btn.clicked.connect(self._open_selected_folder)
+        insp_layout.addWidget(self.insp_finder_btn)
+
+        splitter.addWidget(self.inspector_panel)
+        self.inspector_panel.setVisible(False)
+        splitter.setSizes([210, 890, 0])
         main_layout.addWidget(splitter)
 
         # Status Bar
@@ -1952,16 +2248,20 @@ class MainWindow(QMainWindow):
             size_item.setToolTip(f"Downloaded: {format_file_size(downloaded)}\nTotal Size: {format_file_size(total_size)}")
             self.table.setItem(row, 2, size_item)
 
-            # Col 3: Progress Bar (Shows percentage + visual download numbers)
-            pct = (downloaded / total_size * 100) if total_size > 0 else 0
+            # Col 3: Progress Bar (Shows percentage + visual download numbers; blank when completed)
             if status == "completed":
-                pct = 100.0
-            pbar = QProgressBar()
-            pbar.setValue(int(pct))
-            pbar.setFormat(format_progress_text(pct, downloaded, total_size, status))
-            style_progress_bar(pbar, status)
-            pbar.setToolTip(f"Progress: {pct:.1f}%\nDownloaded: {format_file_size(downloaded)} / {format_file_size(total_size)}")
-            self.table.setCellWidget(row, 3, pbar)
+                self.table.setCellWidget(row, 3, None)
+                blank_item = QTableWidgetItem("")
+                blank_item.setFlags(blank_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, 3, blank_item)
+            else:
+                pct = (downloaded / total_size * 100) if total_size > 0 else 0
+                pbar = QProgressBar()
+                pbar.setValue(int(pct))
+                pbar.setFormat(format_progress_text(pct, downloaded, total_size, status))
+                style_progress_bar(pbar, status)
+                pbar.setToolTip(f"Progress: {pct:.1f}%\nDownloaded: {format_file_size(downloaded)} / {format_file_size(total_size)}")
+                self.table.setCellWidget(row, 3, pbar)
 
             # Col 4: Speed
             spd_str = t.get("speed", "") or "--"
@@ -1999,6 +2299,19 @@ class MainWindow(QMainWindow):
             date_item.setToolTip(f"Added: {t.get('created_at', '--')}\nCompleted: {t.get('completed_at', '--')}")
             self.table.setItem(row, 7, date_item)
 
+        # Update macOS Count Badge
+        if hasattr(self, "count_badge_lbl"):
+            self.count_badge_lbl.setText(f"{len(filtered)} items")
+
+        # Update Summary Footer metrics
+        if hasattr(self, "sum_total_lbl"):
+            total_bytes = sum(t.get("total_size", 0) for t in all_tasks)
+            downloaded_bytes = sum(t.get("downloaded_size", 0) for t in all_tasks)
+            self.sum_total_lbl.setText(f"Total: {format_file_size(total_bytes)}")
+            self.sum_dl_lbl.setText(f"Downloaded: {format_file_size(downloaded_bytes)}")
+
+        self._update_live_metrics()
+        self._update_disk_usage()
         self._update_action_states()
         self._update_status_bar()
 
@@ -2011,6 +2324,10 @@ class MainWindow(QMainWindow):
             self.open_file_act.setEnabled(False)
             self.open_folder_act.setEnabled(False)
             self.delete_act.setEnabled(False)
+            if hasattr(self, "hdr_start_btn"):
+                self.hdr_start_btn.setEnabled(False)
+                self.hdr_pause_btn.setEnabled(False)
+                self.hdr_folder_btn.setEnabled(False)
             return
 
         task = self.db.get_download(t_id)
@@ -2021,6 +2338,10 @@ class MainWindow(QMainWindow):
             self.open_file_act.setEnabled(False)
             self.open_folder_act.setEnabled(False)
             self.delete_act.setEnabled(False)
+            if hasattr(self, "hdr_start_btn"):
+                self.hdr_start_btn.setEnabled(False)
+                self.hdr_pause_btn.setEnabled(False)
+                self.hdr_folder_btn.setEnabled(False)
             return
 
         st = task.get("status", "")
@@ -2028,12 +2349,111 @@ class MainWindow(QMainWindow):
         file_path = task.get("save_path", "")
         file_exists = bool(file_path and os.path.exists(file_path))
 
-        self.resume_act.setEnabled(not is_active and st in ("paused", "cancelled", "failed", "queued", "scheduled"))
+        can_resume = not is_active and st in ("paused", "cancelled", "failed", "queued", "scheduled")
+        self.resume_act.setEnabled(can_resume)
         self.pause_act.setEnabled(is_active)
         self.cancel_act.setEnabled(is_active)
         self.open_file_act.setEnabled(file_exists)
         self.open_folder_act.setEnabled(True)
         self.delete_act.setEnabled(True)
+        if hasattr(self, "hdr_start_btn"):
+            self.hdr_start_btn.setEnabled(can_resume)
+            self.hdr_pause_btn.setEnabled(is_active)
+            self.hdr_folder_btn.setEnabled(True)
+
+    def _on_table_cell_clicked(self, row: int, col: int):
+        if row >= 0 and self.table.item(row, 0):
+            try:
+                t_id = int(self.table.item(row, 0).text())
+                if self.inspector_panel.isVisible():
+                    self._open_inspector(t_id)
+            except Exception:
+                pass
+
+    def _toggle_inspector_action(self, checked: bool):
+        if checked:
+            t_id = self._get_selected_task_id()
+            if t_id:
+                self._open_inspector(t_id)
+            else:
+                self.inspector_panel.setVisible(True)
+        else:
+            self._close_inspector()
+
+    def _open_inspector(self, task_id: int):
+        task = self.db.get_download(task_id)
+        if not task:
+            return
+        self.active_inspector_id = task_id
+        self.insp_fn_lbl.setText(task.get("filename", "--"))
+        self.insp_cat_lbl.setText(f"CATEGORY: {task.get('category', 'OTHER').upper()}")
+
+        dl = task.get("downloaded_size", 0)
+        tot = task.get("total_size", 0)
+        pct = (dl / tot * 100) if tot > 0 else 0
+        if task.get("status") == "completed":
+            pct = 100.0
+
+        self.insp_dl_val.setText(format_size_pair(dl, tot, task.get("status", "")))
+        self.insp_pct_val.setText(f"{pct:.1f}%")
+        self.insp_speed_val.setText(task.get("speed") or "--")
+        self.insp_eta_val.setText(task.get("eta") or "--")
+        self.insp_status_val.setText(task.get("status", "--").capitalize())
+
+        worker = self.active_workers.get(task_id)
+        conns = getattr(worker, "connections", 16) if worker else "--"
+        self.insp_sockets_val.setText(str(conns))
+
+        self.insp_url_edit.setText(task.get("url", ""))
+        self.insp_path_edit.setText(task.get("save_path", ""))
+
+        if not self.inspector_panel.isVisible():
+            self.inspector_panel.setVisible(True)
+        if hasattr(self, "inspector_act") and not self.inspector_act.isChecked():
+            self.inspector_act.blockSignals(True)
+            self.inspector_act.setChecked(True)
+            self.inspector_act.blockSignals(False)
+
+    def _close_inspector(self):
+        self.inspector_panel.setVisible(False)
+        self.active_inspector_id = None
+        if hasattr(self, "inspector_act") and self.inspector_act.isChecked():
+            self.inspector_act.blockSignals(True)
+            self.inspector_act.setChecked(False)
+            self.inspector_act.blockSignals(False)
+
+    def _update_disk_usage(self):
+        if not hasattr(self, "disk_ratio_lbl"):
+            return
+        try:
+            download_dir = self.db.get_setting("download_dir", os.path.expanduser("~/Downloads"))
+            if not os.path.exists(download_dir):
+                download_dir = os.path.expanduser("~")
+            disk = shutil.disk_usage(download_dir)
+            used_gb = (disk.total - disk.free) / (1024**3)
+            total_gb = disk.total / (1024**3)
+            free_gb = disk.free / (1024**3)
+            pct = int(((disk.total - disk.free) / disk.total) * 100) if disk.total > 0 else 0
+
+            self.disk_ratio_lbl.setText(f"{used_gb:.1f} / {total_gb:.0f} GB")
+            self.disk_bar.setValue(pct)
+            self.disk_free_lbl.setText(f"Free: {free_gb:.1f} GB")
+            spd_lim = self.db.get_setting("max_download_speed", "0")
+            self.disk_speed_lbl.setText(f"Speed: {spd_lim} KB/s" if spd_lim != "0" else "Speed: Unlimited")
+        except Exception:
+            pass
+
+    def _update_live_metrics(self):
+        if not hasattr(self, "sum_conns_lbl"):
+            return
+        total_sockets = sum(getattr(w, "connections", 16) for w in self.active_workers.values())
+        self.sum_conns_lbl.setText(f"Active Sockets: {total_sockets}")
+
+        if self._worker_speeds:
+            speeds = list(self._worker_speeds.values())
+            self.sum_speed_lbl.setText(f"Speed: {speeds[0]}")
+        else:
+            self.sum_speed_lbl.setText("Speed: 0 KB/s")
 
     def _start_task(self, task_id: int, connections: int = 16):
         task = self.db.get_download(task_id)
@@ -2069,6 +2489,17 @@ class MainWindow(QMainWindow):
 
     def _on_worker_progress(self, task_id: int, dl: int, tot: int, spd: str, eta: str, pct: float):
         self.db.update_progress(task_id, dl, tot, spd, eta)
+        self._worker_speeds[task_id] = spd
+        self._update_live_metrics()
+
+        # Update inspector if active for this task
+        if self.active_inspector_id == task_id and self.inspector_panel.isVisible():
+            self.insp_dl_val.setText(format_size_pair(dl, tot, "downloading"))
+            self.insp_pct_val.setText(f"{pct:.1f}%")
+            self.insp_speed_val.setText(spd)
+            self.insp_eta_val.setText(eta)
+            self.insp_status_val.setText("Downloading")
+
         # Update row if visible
         for row in range(self.table.rowCount()):
             if self.table.item(row, 0) and self.table.item(row, 0).text() == str(task_id):
@@ -2094,15 +2525,19 @@ class MainWindow(QMainWindow):
     def _on_worker_status(self, task_id: int, status: str, err: str):
         self.db.update_status(task_id, status, err)
         if status in ("completed", "failed", "cancelled", "paused"):
+            self._worker_speeds.pop(task_id, None)
             if task_id in self.active_workers:
                 del self.active_workers[task_id]
+        self._update_live_metrics()
         self._load_downloads()
         self._check_all_finished()
 
     def _on_worker_finished(self, task_id: int, file_path: str):
         self.db.update_status(task_id, "completed")
+        self._worker_speeds.pop(task_id, None)
         if task_id in self.active_workers:
             del self.active_workers[task_id]
+        self._update_live_metrics()
         self._load_downloads()
         fn = os.path.basename(file_path)
         self.status_bar.showMessage(f"Download Finished: {fn}", 5000)
@@ -2318,6 +2753,9 @@ class MainWindow(QMainWindow):
 
         restart_act = menu.addAction("Restart Download")
         restart_act.triggered.connect(self._restart_selected)
+
+        insp_act = menu.addAction("Inspect Download Details")
+        insp_act.triggered.connect(lambda: self._open_inspector(t_id))
 
         menu.addSeparator()
 

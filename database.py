@@ -22,7 +22,7 @@ class Database:
         else:
             self.db_path = db_path
             
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._init_db()
 
     @contextmanager
@@ -135,9 +135,15 @@ class Database:
             initial_status = "scheduled" if scheduled_time else "queued"
             
             # Auto-route save_path if it was set to plain base dir
-            base_dir = self.get_setting("download_dir", DEFAULT_DOWNLOAD_DIR)
-            if self.get_setting("smart_routing", "true") == "true":
-                # If save_path's dirname is base_dir and filename has known category
+            cursor.execute("SELECT value FROM settings WHERE key = 'download_dir'")
+            r_dir = cursor.fetchone()
+            base_dir = r_dir["value"] if r_dir else DEFAULT_DOWNLOAD_DIR
+
+            cursor.execute("SELECT value FROM settings WHERE key = 'smart_routing'")
+            r_smart = cursor.fetchone()
+            smart_on = (r_smart["value"] == "true") if r_smart else True
+
+            if smart_on:
                 if os.path.dirname(os.path.abspath(save_path)) == os.path.abspath(base_dir):
                     cat_name = self.categorize_filename(filename)
                     if cat_name != "Other":
