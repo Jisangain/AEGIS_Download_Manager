@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 import urllib.parse
+import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from PyQt6.QtWidgets import (
@@ -16,47 +17,83 @@ from PyQt6.QtWidgets import (
     QSpinBox, QProgressBar, QMessageBox, QMenu, QToolBar, QStatusBar,
     QCheckBox, QDateTimeEdit, QTextEdit, QStackedWidget, QFrame
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime, QThread
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication
 
 from database import Database
 from engine import (
     UrlAnalyzerThread, Aria2Worker, YtDlpWorker, DirectHttpWorker,
-    find_tool_binary
+    find_tool_binary, prevent_sleep, allow_sleep
 )
 from ipc_server import AegisIpcServer
+from automation import (
+    calculate_checksums, run_windows_defender_scan,
+    is_extractable_archive, extract_archive_safe,
+    SiteGrabberCrawler, compute_smart_save_path,
+    CATEGORY_MAP, get_file_category
+)
+
+def format_file_size(size_bytes: int) -> str:
+    """Formats bytes into human readable KB, MB or GB string."""
+    if size_bytes <= 0:
+        return "--"
+    if size_bytes >= 1073741824:
+        return f"{size_bytes / (1024**3):.2f} GB"
+    if size_bytes >= 1048576:
+        return f"{size_bytes / (1024**2):.2f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} B"
+
+
+def format_size_pair(downloaded: int, total: int, status: str = "") -> str:
+    """Formats downloaded and total sizes into visual display e.g. '120.50 MB / 500.00 MB'."""
+    s = (status or "").lower()
+    if s == "completed":
+        return format_file_size(total if total > 0 else downloaded)
+    if downloaded > 0 and total > 0:
+        return f"{format_file_size(downloaded)} / {format_file_size(total)}"
+    if downloaded > 0 and total <= 0:
+        return f"{format_file_size(downloaded)} / --"
+    if total > 0:
+        return f"0 MB / {format_file_size(total)}" if s == "downloading" else format_file_size(total)
+    return "--"
+
+
+def format_progress_text(pct: float, downloaded: int, total: int, status: str = "") -> str:
+    """Returns visual progress bar text with percentage and numbers."""
+    s = (status or "").lower()
+    if s == "completed" or pct >= 100.0:
+        sz = format_file_size(total if total > 0 else downloaded)
+        return f"100% ({sz})" if sz != "--" else "100%"
+    if total > 0 and downloaded > 0:
+        return f"{pct:.1f}% ({format_file_size(downloaded)} / {format_file_size(total)})"
+    if downloaded > 0:
+        return f"{pct:.1f}% ({format_file_size(downloaded)})"
+    return f"{pct:.1f}%"
+
+
 
 def get_category_icon(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    if ext in [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv", ".m4v"]:
-        return "🎬"
-    if ext in [".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".opus"]:
-        return "🎵"
-    if ext in [".pdf", ".docx", ".doc", ".xlsx", ".pptx", ".txt", ".epub"]:
-        return "📄"
-    if ext in [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso"]:
-        return "📦"
-    if ext in [".exe", ".msi", ".bat", ".apk", ".dmg", ".cmd"]:
-        return "⚡"
-    return "🌐"
+    return ""
 
 def format_status(status: str) -> tuple[str, str]:
     """Returns (display_text, hex_color)."""
     s = (status or "").lower()
     if s == "completed":
-        return "✔ Completed", "#10B981"
+        return "Completed", "#10B981"
     elif s == "downloading":
-        return "⬇ Downloading", "#38BDF8"
+        return "Downloading", "#38BDF8"
     elif s == "paused":
-        return "⏸ Paused", "#F59E0B"
+        return "Paused", "#F59E0B"
     elif s == "scheduled":
-        return "⏰ Scheduled", "#A78BFA"
+        return "Scheduled", "#A78BFA"
     elif s == "queued":
-        return "⏳ Queued", "#94A3B8"
+        return "Queued", "#94A3B8"
     elif s == "failed":
-        return "✖ Failed", "#F87171"
+        return "Failed", "#F87171"
     elif s == "cancelled":
-        return "⏹ Cancelled", "#64748B"
+        return "Cancelled", "#64748B"
     return status.capitalize(), "#94A3B8"
 
 def style_progress_bar(pbar: QProgressBar, status: str):
@@ -360,7 +397,7 @@ class BatchImportDialog(QDialog):
 
         # File Chooser
         top_layout = QHBoxLayout()
-        load_btn = QPushButton("📂 Open .txt File...")
+        load_btn = QPushButton("Open .txt File...")
         load_btn.clicked.connect(self._load_file)
         self.file_lbl = QLabel("Load a text file or paste multiple URLs below.")
         self.file_lbl.setStyleSheet("color: #94A3B8;")
@@ -612,6 +649,8 @@ class AddDownloadDialog(QDialog):
         fmt_lbl.setFixedWidth(80)
         self.format_combo = QComboBox()
         self.format_combo.setEnabled(False)
+        self.format_combo.setMaxVisibleItems(16)
+        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
         fmt_layout.addWidget(fmt_lbl)
         fmt_layout.addWidget(self.format_combo)
         layout.addLayout(fmt_layout)
@@ -690,24 +729,57 @@ class AddDownloadDialog(QDialog):
         self.analyzed_result = result
         self.analyze_btn.setEnabled(True)
         self.analyze_btn.setText("Analyze Link")
-        self.filename_input.setText(result.get("filename", "download"))
+        fn = result.get("filename", "download")
+        self.filename_input.setText(fn)
+
+        # Smart Folder Routing
+        if self.db.get_setting("smart_routing", "true") == "true":
+            base_dir = self.db.get_setting("download_dir", os.path.expanduser("~/Downloads"))
+            routed = self.db.get_routed_save_path(fn, base_dir)
+            self.save_input.setText(os.path.dirname(routed))
 
         formats = result.get("formats", [])
         if formats:
+            self.format_combo.blockSignals(True)
             self.format_combo.clear()
             for f in formats:
                 self.format_combo.addItem(f["label"], f["id"])
             self.format_combo.setEnabled(True)
-            self.status_lbl.setText(f"Media stream detected! Found {len(formats)} quality formats.")
+            self.format_combo.blockSignals(False)
+            self.status_lbl.setText(f"Media stream detected! Found {len(formats)} quality options (4K, HD, SD, Audio).")
         else:
+            self.format_combo.blockSignals(True)
             self.format_combo.clear()
             self.format_combo.setEnabled(False)
+            self.format_combo.blockSignals(False)
             size = result.get("filesize", 0)
             if size > 0:
                 mb = size / (1024 * 1024)
                 self.status_lbl.setText(f"Direct download verified. Size: {mb:.2f} MB")
             else:
                 self.status_lbl.setText("Direct download link verified.")
+
+    def _on_format_changed(self, index: int):
+        fmt = self.format_combo.currentData()
+        if not fmt:
+            return
+        cur_fn = self.filename_input.text().strip()
+        if not cur_fn:
+            return
+        base_name, _ = os.path.splitext(cur_fn)
+        ext = "mp4"
+        for f in self.analyzed_result.get("formats", []):
+            if f.get("id") == fmt:
+                ext = f.get("ext", "mp4")
+                break
+        new_fn = f"{base_name}.{ext}"
+        self.filename_input.setText(new_fn)
+
+        # Smart Folder Routing update on extension change
+        if self.db.get_setting("smart_routing", "true") == "true":
+            base_dir = self.db.get_setting("download_dir", os.path.expanduser("~/Downloads"))
+            routed = self.db.get_routed_save_path(new_fn, base_dir)
+            self.save_input.setText(os.path.dirname(routed))
 
     def _on_analysis_fail(self, err: str):
         self.analyze_btn.setEnabled(True)
@@ -814,6 +886,34 @@ class SettingsDialog(QDialog):
         clip_layout.addWidget(self.clip_chk)
         layout.addLayout(clip_layout)
 
+        # Smart Folder Routing Checkbox
+        smart_layout = QHBoxLayout()
+        self.smart_route_chk = QCheckBox("Enable Smart Category Folder Routing (Auto-sort into Video, Audio, Documents, etc.)")
+        self.smart_route_chk.setChecked(self.db.get_setting("smart_routing", "true") == "true")
+        smart_layout.addWidget(self.smart_route_chk)
+        layout.addLayout(smart_layout)
+
+        # Auto Windows Defender Scan Checkbox
+        defender_layout = QHBoxLayout()
+        self.defender_chk = QCheckBox("Auto-scan completed downloads with Windows Defender")
+        self.defender_chk.setChecked(self.db.get_setting("auto_antivirus_scan", "false") == "true")
+        defender_layout.addWidget(self.defender_chk)
+        layout.addLayout(defender_layout)
+
+        # Auto Extract Archives Checkbox
+        extract_layout = QHBoxLayout()
+        self.extract_chk = QCheckBox("Auto-extract downloaded ZIP / TAR archives upon completion")
+        self.extract_chk.setChecked(self.db.get_setting("auto_extract_archives", "false") == "true")
+        extract_layout.addWidget(self.extract_chk)
+        layout.addLayout(extract_layout)
+
+        # Auto Shutdown Checkbox
+        shutdown_layout = QHBoxLayout()
+        self.shutdown_chk = QCheckBox("Auto-Shutdown PC when all downloads finish (with 30s cancellation window)")
+        self.shutdown_chk.setChecked(self.db.get_setting("auto_shutdown", "false") == "true")
+        shutdown_layout.addWidget(self.shutdown_chk)
+        layout.addLayout(shutdown_layout)
+
         # aria2 path
         aria_layout = QHBoxLayout()
         aria_lbl = QLabel("aria2c Executable:")
@@ -892,9 +992,476 @@ class SettingsDialog(QDialog):
         self.db.set_setting("default_connections", str(self.conn_spin.value()))
         self.db.set_setting("max_download_speed", str(self.speed_spin.value()))
         self.db.set_setting("clipboard_monitor", "true" if self.clip_chk.isChecked() else "false")
+        self.db.set_setting("smart_routing", "true" if self.smart_route_chk.isChecked() else "false")
+        self.db.set_setting("auto_antivirus_scan", "true" if self.defender_chk.isChecked() else "false")
+        self.db.set_setting("auto_extract_archives", "true" if self.extract_chk.isChecked() else "false")
+        self.db.set_setting("auto_shutdown", "true" if self.shutdown_chk.isChecked() else "false")
         self.db.set_setting("aria2_path", self.aria_input.text())
         self.db.set_setting("ffmpeg_path", self.ff_input.text())
         self.accept()
+
+
+class ChecksumWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, filepath: str):
+        super().__init__()
+        self.filepath = filepath
+
+    def run(self):
+        try:
+            res = calculate_checksums(self.filepath, progress_callback=self.progress.emit)
+            self.finished.emit(res)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class ChecksumDialog(QDialog):
+    def __init__(self, filepath: str, parent=None):
+        super().__init__(parent)
+        self.filepath = filepath
+        self.setWindowTitle("File Integrity Verification - Checksums")
+        self.setStyleSheet(DARK_STYLESHEET)
+        self.resize(580, 400)
+        self.hashes = {}
+        self._init_ui()
+        self._start_hashing()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        fn = os.path.basename(self.filepath)
+        sz = os.path.getsize(self.filepath) if os.path.exists(self.filepath) else 0
+        info_lbl = QLabel(f"File: {fn} ({format_file_size(sz)})")
+        info_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #F1F5F9;")
+        layout.addWidget(info_lbl)
+
+        self.pbar = QProgressBar()
+        self.pbar.setRange(0, 100)
+        self.pbar.setValue(0)
+        self.pbar.setTextVisible(True)
+        self.pbar.setFormat("Calculating Checksums: %p%")
+        self.pbar.setStyleSheet("QProgressBar { background-color: #0F172A; height: 16px; border-radius: 4px; text-align: center; color: white; font-size: 11px; } QProgressBar::chunk { background-color: #2563EB; border-radius: 4px; }")
+        layout.addWidget(self.pbar)
+
+        self.md5_input = self._create_hash_row(layout, "MD5:")
+        self.sha1_input = self._create_hash_row(layout, "SHA-1:")
+        self.sha256_input = self._create_hash_row(layout, "SHA-256:")
+
+        cmp_layout = QVBoxLayout()
+        cmp_lbl = QLabel("Compare with Expected Hash:")
+        cmp_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600;")
+        cmp_layout.addWidget(cmp_lbl)
+
+        self.cmp_input = QLineEdit()
+        self.cmp_input.setPlaceholderText("Paste expected MD5, SHA-1, or SHA-256 checksum here...")
+        self.cmp_input.textChanged.connect(self._verify_match)
+        cmp_layout.addWidget(self.cmp_input)
+
+        self.match_badge = QLabel("Awaiting input")
+        self.match_badge.setStyleSheet("color: #64748B; font-weight: 600; font-size: 12px; padding: 4px;")
+        cmp_layout.addWidget(self.match_badge)
+        layout.addLayout(cmp_layout)
+
+        layout.addStretch()
+
+        close_btn = QPushButton("Close")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def _create_hash_row(self, layout: QVBoxLayout, label_text: str) -> QLineEdit:
+        row = QHBoxLayout()
+        lbl = QLabel(label_text)
+        lbl.setFixedWidth(65)
+        lbl.setStyleSheet("color: #CBD5E1; font-weight: 500;")
+        inp = QLineEdit()
+        inp.setReadOnly(True)
+        inp.setPlaceholderText("Calculating...")
+        copy_btn = QPushButton("Copy")
+        copy_btn.setFixedWidth(60)
+        copy_btn.clicked.connect(lambda: QGuiApplication.clipboard().setText(inp.text()))
+        row.addWidget(lbl)
+        row.addWidget(inp)
+        row.addWidget(copy_btn)
+        layout.addLayout(row)
+        return inp
+
+    def _start_hashing(self):
+        self.worker = ChecksumWorker(self.filepath)
+        self.worker.progress.connect(self.pbar.setValue)
+        self.worker.finished.connect(self._on_hashes_ready)
+        self.worker.failed.connect(lambda err: self.match_badge.setText(f"Error: {err}"))
+        self.worker.start()
+
+    def _on_hashes_ready(self, res: dict):
+        self.hashes = res
+        self.pbar.setValue(100)
+        self.pbar.setFormat("Hashing Complete")
+        self.md5_input.setText(res.get("md5", ""))
+        self.sha1_input.setText(res.get("sha1", ""))
+        self.sha256_input.setText(res.get("sha256", ""))
+        self._verify_match()
+
+    def _verify_match(self):
+        exp = self.cmp_input.text().strip().lower()
+        if not exp:
+            self.match_badge.setText("Awaiting expected hash input")
+            self.match_badge.setStyleSheet("color: #64748B; font-weight: 600;")
+            return
+
+        if not self.hashes:
+            self.match_badge.setText("Calculating checksums...")
+            self.match_badge.setStyleSheet("color: #38BDF8; font-weight: 600;")
+            return
+
+        all_hashes = [self.hashes.get("md5", ""), self.hashes.get("sha1", ""), self.hashes.get("sha256", "")]
+        if exp in all_hashes:
+            self.match_badge.setText("VERIFIED MATCH: Checksum perfectly matches file content!")
+            self.match_badge.setStyleSheet("color: #10B981; font-weight: bold; font-size: 12px;")
+        else:
+            self.match_badge.setText("CHECKSUM MISMATCH: Hash does not match MD5, SHA-1, or SHA-256!")
+            self.match_badge.setStyleSheet("color: #EF4444; font-weight: bold; font-size: 12px;")
+
+
+class SiteCrawlerThread(QThread):
+    status_msg = pyqtSignal(str, int)
+    finished = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, start_url: str, depth: int, categories: list, custom_exts: list):
+        super().__init__()
+        self.start_url = start_url
+        self.depth = depth
+        self.categories = categories
+        self.custom_exts = custom_exts
+
+    def run(self):
+        try:
+            crawler = SiteGrabberCrawler(
+                self.start_url, depth=self.depth,
+                categories=self.categories,
+                custom_extensions=self.custom_exts
+            )
+            items = crawler.crawl(progress_callback=lambda msg, count: self.status_msg.emit(msg, count))
+            self.finished.emit(items)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class SiteGrabberDialog(QDialog):
+    def __init__(self, parent=None, db: Optional[Database] = None):
+        super().__init__(parent)
+        self.db = db or Database()
+        self.setWindowTitle("Site Grabber & Link Crawler")
+        self.setStyleSheet(DARK_STYLESHEET)
+        self.resize(780, 540)
+        self.crawler_thread: Optional[SiteCrawlerThread] = None
+        self.found_items: List[Dict[str, Any]] = []
+        self.added_count = 0
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 18)
+
+        top_layout = QHBoxLayout()
+        url_lbl = QLabel("Page URL:")
+        url_lbl.setFixedWidth(70)
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://example.com/gallery or web page...")
+        top_layout.addWidget(url_lbl)
+        top_layout.addWidget(self.url_input)
+
+        depth_lbl = QLabel("Depth:")
+        self.depth_spin = QSpinBox()
+        self.depth_spin.setRange(1, 3)
+        self.depth_spin.setValue(1)
+        self.depth_spin.setToolTip("1 = Current page only, 2 = Follow links on same domain")
+        top_layout.addWidget(depth_lbl)
+        top_layout.addWidget(self.depth_spin)
+
+        self.crawl_btn = QPushButton("Start Crawl")
+        self.crawl_btn.clicked.connect(self._toggle_crawl)
+        top_layout.addWidget(self.crawl_btn)
+        layout.addLayout(top_layout)
+
+        filter_group = QHBoxLayout()
+        filter_lbl = QLabel("Capture:")
+        filter_lbl.setFixedWidth(70)
+        filter_group.addWidget(filter_lbl)
+
+        self.chk_video = QCheckBox("Videos")
+        self.chk_video.setChecked(True)
+        self.chk_audio = QCheckBox("Audio")
+        self.chk_audio.setChecked(True)
+        self.chk_docs = QCheckBox("Documents")
+        self.chk_docs.setChecked(True)
+        self.chk_archives = QCheckBox("Archives")
+        self.chk_archives.setChecked(True)
+        self.chk_programs = QCheckBox("Programs")
+        self.chk_programs.setChecked(True)
+        self.chk_images = QCheckBox("Images")
+        self.chk_images.setChecked(False)
+
+        filter_group.addWidget(self.chk_video)
+        filter_group.addWidget(self.chk_audio)
+        filter_group.addWidget(self.chk_docs)
+        filter_group.addWidget(self.chk_archives)
+        filter_group.addWidget(self.chk_programs)
+        filter_group.addWidget(self.chk_images)
+        filter_group.addStretch()
+        layout.addLayout(filter_group)
+
+        self.status_lbl = QLabel("Enter a URL and click Start Crawl to discover downloadable media and files.")
+        self.status_lbl.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        layout.addWidget(self.status_lbl)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["", "File Name", "Category", "Ext", "URL"])
+        self.table.setColumnWidth(0, 35)
+        self.table.setColumnWidth(1, 230)
+        self.table.setColumnWidth(2, 95)
+        self.table.setColumnWidth(3, 60)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
+
+        sel_row = QHBoxLayout()
+        sel_all = QPushButton("Select All")
+        sel_all.clicked.connect(self._select_all)
+        desel_all = QPushButton("Deselect All")
+        desel_all.clicked.connect(self._deselect_all)
+        self.summary_lbl = QLabel("0 files discovered.")
+        self.summary_lbl.setStyleSheet("color: #CBD5E1; font-weight: 500;")
+        sel_row.addWidget(sel_all)
+        sel_row.addWidget(desel_all)
+        sel_row.addWidget(self.summary_lbl)
+        sel_row.addStretch()
+        layout.addLayout(sel_row)
+
+        save_row = QHBoxLayout()
+        save_lbl = QLabel("Save To:")
+        save_lbl.setFixedWidth(70)
+        self.save_input = QLineEdit(self.db.get_setting("download_dir", os.path.expanduser("~/Downloads")))
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse)
+        save_row.addWidget(save_lbl)
+        save_row.addWidget(self.save_input)
+        save_row.addWidget(browse_btn)
+        layout.addLayout(save_row)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("Close")
+        cancel_btn.setStyleSheet("background-color: #333842;")
+        cancel_btn.clicked.connect(self.reject)
+        self.import_btn = QPushButton("Add Selected to Queue (0)")
+        self.import_btn.setEnabled(False)
+        self.import_btn.clicked.connect(self._import_selected)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(self.import_btn)
+        layout.addLayout(btn_layout)
+
+    def _browse(self):
+        folder = QFileDialog.getExistingDirectory(self, "Save Directory", self.save_input.text())
+        if folder:
+            self.save_input.setText(folder)
+
+    def _toggle_crawl(self):
+        if self.crawler_thread and self.crawler_thread.isRunning():
+            self.crawler_thread.terminate()
+            self.crawl_btn.setText("Start Crawl")
+            self.status_lbl.setText("Crawl cancelled.")
+            return
+
+        url = self.url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "Invalid URL", "Please enter a valid target URL.")
+            return
+
+        cats = []
+        if self.chk_video.isChecked(): cats.append("Video")
+        if self.chk_audio.isChecked(): cats.append("Audio")
+        if self.chk_docs.isChecked(): cats.append("Documents")
+        if self.chk_archives.isChecked(): cats.append("Compressed")
+        if self.chk_programs.isChecked(): cats.append("Programs")
+        if self.chk_images.isChecked(): cats.append("Images")
+
+        self.table.setRowCount(0)
+        self.found_items.clear()
+        self.crawl_btn.setText("Stop Crawl")
+        self.status_lbl.setText("Connecting and crawling links...")
+
+        self.crawler_thread = SiteCrawlerThread(url, self.depth_spin.value(), cats, [])
+        self.crawler_thread.status_msg.connect(lambda msg, count: self.status_lbl.setText(f"{msg} ({count} found)"))
+        self.crawler_thread.finished.connect(self._on_crawl_finished)
+        self.crawler_thread.failed.connect(self._on_crawl_failed)
+        self.crawler_thread.start()
+
+    def _on_crawl_finished(self, items: list):
+        self.crawl_btn.setText("Start Crawl")
+        self.found_items = items
+        self.status_lbl.setText(f"Crawl completed. Discovered {len(items)} downloadable files.")
+        self.table.setRowCount(len(items))
+
+        for row, item in enumerate(items):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            chk.setCheckState(Qt.CheckState.Checked)
+
+            fn_item = QTableWidgetItem(item["filename"])
+            cat_item = QTableWidgetItem(item["category"])
+            ext_item = QTableWidgetItem(item["extension"].upper())
+            url_item = QTableWidgetItem(item["url"])
+
+            self.table.setItem(row, 0, chk)
+            self.table.setItem(row, 1, fn_item)
+            self.table.setItem(row, 2, cat_item)
+            self.table.setItem(row, 3, ext_item)
+            self.table.setItem(row, 4, url_item)
+
+        self._update_counts()
+
+    def _on_crawl_failed(self, err: str):
+        self.crawl_btn.setText("Start Crawl")
+        self.status_lbl.setText(f"Crawl failed: {err}")
+
+    def _select_all(self):
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it: it.setCheckState(Qt.CheckState.Checked)
+        self._update_counts()
+
+    def _deselect_all(self):
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it: it.setCheckState(Qt.CheckState.Unchecked)
+        self._update_counts()
+
+    def _update_counts(self):
+        cnt = 0
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it and it.checkState() == Qt.CheckState.Checked:
+                cnt += 1
+        self.summary_lbl.setText(f"{len(self.found_items)} files discovered. {cnt} selected.")
+        self.import_btn.setText(f"Add Selected to Queue ({cnt})")
+        self.import_btn.setEnabled(cnt > 0)
+
+    def _import_selected(self):
+        base_dir = self.save_input.text().strip() or os.path.expanduser("~/Downloads")
+        smart_on = self.db.get_setting("smart_routing", "true") == "true"
+        self.added_count = 0
+
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it and it.checkState() == Qt.CheckState.Checked and r < len(self.found_items):
+                item = self.found_items[r]
+                url = item["url"]
+                fn = item["filename"]
+                routed_path = compute_smart_save_path(base_dir, fn, smart_on)
+                cat = item["category"]
+                self.db.add_download(
+                    url=url,
+                    filename=fn,
+                    save_path=routed_path,
+                    category=cat,
+                    engine_type="auto"
+                )
+                self.added_count += 1
+
+        self.accept()
+
+
+class AutoShutdownCountdownDialog(QDialog):
+    """Countdown dialog alerting user before computer shutdown with cancel option."""
+    def __init__(self, parent=None, countdown_seconds: int = 30):
+        super().__init__(parent)
+        self.setWindowTitle("Auto-Shutdown Imminent - Aegis DM")
+        self.setStyleSheet(DARK_STYLESHEET)
+        self.resize(460, 200)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.remaining = countdown_seconds
+        self.cancelled = False
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        title_lbl = QLabel("All Downloads Complete")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #EF4444;")
+        layout.addWidget(title_lbl)
+
+        self.msg_lbl = QLabel(f"Your computer is scheduled to shut down in {self.remaining} seconds.")
+        self.msg_lbl.setStyleSheet("font-size: 13px; color: #F1F5F9;")
+        layout.addWidget(self.msg_lbl)
+
+        btn_layout = QHBoxLayout()
+        self.cancel_btn = QPushButton("Cancel Shutdown")
+        self.cancel_btn.setStyleSheet("background-color: #2563EB; font-weight: bold; padding: 8px 20px;")
+        self.cancel_btn.clicked.connect(self._cancel)
+
+        self.shutdown_now_btn = QPushButton("Shutdown Now")
+        self.shutdown_now_btn.setStyleSheet("background-color: #DC2626; padding: 8px 16px;")
+        self.shutdown_now_btn.clicked.connect(self._shutdown_now)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.shutdown_now_btn)
+        layout.addLayout(btn_layout)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(1000)
+
+        # Schedule Windows shutdown command as failsafe
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    ["shutdown", "/s", "/t", str(self.remaining), "/c", "Aegis Download Manager: All downloads completed. Shutting down system."],
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+            except Exception:
+                pass
+
+    def _tick(self):
+        self.remaining -= 1
+        if self.remaining <= 0:
+            self.timer.stop()
+            self.accept()
+        else:
+            self.msg_lbl.setText(f"Your computer is scheduled to shut down in {self.remaining} seconds.")
+
+    def _cancel(self):
+        self.cancelled = True
+        self.timer.stop()
+        if sys.platform == "win32":
+            try:
+                subprocess.run(["shutdown", "/a"], creationflags=subprocess.CREATE_NO_WINDOW)
+            except Exception:
+                pass
+        self.reject()
+
+    def _shutdown_now(self):
+        self.timer.stop()
+        if sys.platform == "win32":
+            try:
+                subprocess.run(["shutdown", "/s", "/t", "0", "/f"], creationflags=subprocess.CREATE_NO_WINDOW)
+            except Exception:
+                pass
+        self.accept()
+
+    def closeEvent(self, event):
+        self._cancel()
+        event.accept()
+
 
 
 class MainWindow(QMainWindow):
@@ -941,46 +1508,51 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        self.add_act = QAction("➕ New Download", self)
+        self.add_act = QAction("New Download", self)
         self.add_act.setToolTip("Add a single download URL")
         self.add_act.triggered.connect(self._open_add_dialog)
         toolbar.addAction(self.add_act)
 
-        self.batch_act = QAction("📑 Batch Import", self)
+        self.batch_act = QAction("Batch Import", self)
         self.batch_act.setToolTip("Import multiple URLs from a text file")
         self.batch_act.triggered.connect(self._open_batch_dialog)
         toolbar.addAction(self.batch_act)
 
+        self.grabber_act = QAction("Site Grabber", self)
+        self.grabber_act.setToolTip("Crawl web pages to batch download media and files")
+        self.grabber_act.triggered.connect(self._open_site_grabber)
+        toolbar.addAction(self.grabber_act)
+
         toolbar.addSeparator()
 
-        self.resume_act = QAction("▶ Resume", self)
+        self.resume_act = QAction("Resume", self)
         self.resume_act.setToolTip("Resume or start selected download")
         self.resume_act.triggered.connect(self._resume_selected)
         toolbar.addAction(self.resume_act)
 
-        self.pause_act = QAction("⏸ Pause", self)
+        self.pause_act = QAction("Pause", self)
         self.pause_act.setToolTip("Pause selected download")
         self.pause_act.triggered.connect(self._pause_selected)
         toolbar.addAction(self.pause_act)
 
-        self.cancel_act = QAction("⏹ Cancel", self)
+        self.cancel_act = QAction("Cancel", self)
         self.cancel_act.setToolTip("Cancel selected download")
         self.cancel_act.triggered.connect(self._cancel_selected)
         toolbar.addAction(self.cancel_act)
 
         toolbar.addSeparator()
 
-        self.open_file_act = QAction("📄 Open File", self)
+        self.open_file_act = QAction("Open File", self)
         self.open_file_act.setToolTip("Open the completed file")
         self.open_file_act.triggered.connect(self._open_selected_file)
         toolbar.addAction(self.open_file_act)
 
-        self.open_folder_act = QAction("📁 Open Folder", self)
+        self.open_folder_act = QAction("Open Folder", self)
         self.open_folder_act.setToolTip("Open destination directory in Explorer")
         self.open_folder_act.triggered.connect(self._open_selected_folder)
         toolbar.addAction(self.open_folder_act)
 
-        self.delete_act = QAction("🗑 Delete", self)
+        self.delete_act = QAction("Delete", self)
         self.delete_act.setToolTip("Remove task from download history")
         self.delete_act.triggered.connect(self._delete_selected)
         toolbar.addAction(self.delete_act)
@@ -988,13 +1560,20 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Clipboard sniffer quick toggle
-        self.sniffer_act = QAction("📋 Sniffer", self, checkable=True)
+        self.sniffer_act = QAction("Sniffer", self, checkable=True)
         self.sniffer_act.setToolTip("Toggle automatic clipboard link detection")
         self.sniffer_act.setChecked(self.db.get_setting("clipboard_monitor", "false") == "true")
         self.sniffer_act.toggled.connect(self._toggle_sniffer)
         toolbar.addAction(self.sniffer_act)
 
-        self.settings_act = QAction("⚙ Settings", self)
+        # Auto-shutdown quick toggle
+        self.autoshutdown_act = QAction("Auto Shutdown", self, checkable=True)
+        self.autoshutdown_act.setToolTip("Automatically shut down computer when all active downloads complete")
+        self.autoshutdown_act.setChecked(self.db.get_setting("auto_shutdown", "false") == "true")
+        self.autoshutdown_act.toggled.connect(self._toggle_auto_shutdown)
+        toolbar.addAction(self.autoshutdown_act)
+
+        self.settings_act = QAction("Settings", self)
         self.settings_act.setToolTip("Configure speeds, folders, and tools")
         self.settings_act.triggered.connect(self._open_settings)
         toolbar.addAction(self.settings_act)
@@ -1012,16 +1591,16 @@ class MainWindow(QMainWindow):
         self.sidebar = QListWidget()
         self.sidebar.setFixedWidth(195)
         self.category_defs = [
-            ("📂 All", "All"),
-            ("⬇ Downloading", "Downloading"),
-            ("✔ Completed", "Completed"),
-            ("⏸ Paused", "Paused"),
-            ("⏰ Scheduled", "Scheduled"),
-            ("🎬 Video", "Video"),
-            ("🎵 Audio", "Audio"),
-            ("📄 Documents", "Documents"),
-            ("📦 Compressed", "Compressed"),
-            ("⚡ Programs", "Programs")
+            ("All", "All"),
+            ("Downloading", "Downloading"),
+            ("Completed", "Completed"),
+            ("Paused", "Paused"),
+            ("Scheduled", "Scheduled"),
+            ("Video", "Video"),
+            ("Audio", "Audio"),
+            ("Documents", "Documents"),
+            ("Compressed", "Compressed"),
+            ("Programs", "Programs")
         ]
         for label, cat_key in self.category_defs:
             item = QListWidgetItem(label)
@@ -1046,7 +1625,7 @@ class MainWindow(QMainWindow):
 
         # Real-time search filter
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Filter downloads by name or URL...")
+        self.search_input.setPlaceholderText("Filter downloads by name or URL...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setFixedWidth(270)
         self.search_input.textChanged.connect(self._on_search_changed)
@@ -1076,17 +1655,17 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(0, 46)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(2, 145)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(3, 175)
+        self.table.setColumnWidth(3, 215)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(4, 95)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 75)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(6, 110)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(7, 135)
+        self.table.setColumnWidth(7, 125)
         self.stack.addWidget(self.table)
 
         # Empty State Overlay Widget
@@ -1094,10 +1673,6 @@ class MainWindow(QMainWindow):
         empty_vbox = QVBoxLayout(self.empty_widget)
         empty_vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_vbox.setSpacing(12)
-
-        empty_icon = QLabel("📥")
-        empty_icon.setStyleSheet("font-size: 42px; color: #475569;")
-        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.empty_title = QLabel("No Downloads Found")
         self.empty_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #F1F5F9;")
@@ -1107,11 +1682,10 @@ class MainWindow(QMainWindow):
         self.empty_subtitle.setStyleSheet("font-size: 12px; color: #94A3B8;")
         self.empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        empty_btn = QPushButton("➕ Add Download")
+        empty_btn = QPushButton("Add Download")
         empty_btn.setFixedWidth(160)
         empty_btn.clicked.connect(self._open_add_dialog)
 
-        empty_vbox.addWidget(empty_icon)
         empty_vbox.addWidget(self.empty_title)
         empty_vbox.addWidget(self.empty_subtitle)
         empty_vbox.addWidget(empty_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1171,6 +1745,13 @@ class MainWindow(QMainWindow):
             self._load_downloads()
             self._process_queue()
             self.status_bar.showMessage(f"Batch import added {dlg.added_count} task(s) to queue.", 5000)
+
+    def _open_site_grabber(self):
+        dlg = SiteGrabberDialog(self, self.db)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._load_downloads()
+            self._process_queue()
+            self.status_bar.showMessage(f"Site Grabber added {dlg.added_count} download(s) to queue.", 5000)
 
     def _toggle_sniffer(self, checked: bool):
         self.db.set_setting("clipboard_monitor", "true" if checked else "false")
@@ -1355,30 +1936,31 @@ class MainWindow(QMainWindow):
             id_item.setForeground(QColor("#64748B"))
             self.table.setItem(row, 0, id_item)
 
-            # Col 1: Filename with category icon
-            icon = get_category_icon(filename)
-            fn_item = QTableWidgetItem(f"{icon} {filename}")
+            # Col 1: Filename
+            fn_item = QTableWidgetItem(filename)
             fn_font = QFont("Segoe UI", 9)
             fn_font.setBold(True)
             fn_item.setFont(fn_font)
             fn_item.setToolTip(f"{filename}\nURL: {t.get('url', '')}\nSaved: {t.get('save_path', '')}")
             self.table.setItem(row, 1, fn_item)
 
-            # Col 2: Size
-            size_str = f"{total_size / (1024*1024):.2f} MB" if total_size > 0 else "--"
+            # Col 2: Size (Shows downloaded / total numbers)
+            size_str = format_size_pair(downloaded, total_size, status)
             size_item = QTableWidgetItem(size_str)
             size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             size_item.setForeground(QColor("#CBD5E1"))
+            size_item.setToolTip(f"Downloaded: {format_file_size(downloaded)}\nTotal Size: {format_file_size(total_size)}")
             self.table.setItem(row, 2, size_item)
 
-            # Col 3: Progress Bar
+            # Col 3: Progress Bar (Shows percentage + visual download numbers)
             pct = (downloaded / total_size * 100) if total_size > 0 else 0
             if status == "completed":
                 pct = 100.0
             pbar = QProgressBar()
             pbar.setValue(int(pct))
-            pbar.setFormat(f"{pct:.1f}%")
+            pbar.setFormat(format_progress_text(pct, downloaded, total_size, status))
             style_progress_bar(pbar, status)
+            pbar.setToolTip(f"Progress: {pct:.1f}%\nDownloaded: {format_file_size(downloaded)} / {format_file_size(total_size)}")
             self.table.setCellWidget(row, 3, pbar)
 
             # Col 4: Speed
@@ -1467,13 +2049,13 @@ class MainWindow(QMainWindow):
         engine = task.get("engine_type", "auto")
         max_speed = int(self.db.get_setting("max_download_speed", "0"))
 
-        # Choose worker
+        # Choose worker: prefer aria2 for multi-threaded segments on both 'aria2' and 'auto'
         if engine == "ytdlp":
             worker = YtDlpWorker(task_id, task["url"], task["filename"], save_dir, connections, task.get("format_id", ""), tools_conf, max_speed_kbs=max_speed)
-        elif engine == "aria2" and find_tool_binary("aria2c", tools_conf["aria2_path"]):
+        elif (engine in ("aria2", "auto")) and find_tool_binary("aria2c", tools_conf["aria2_path"]):
             worker = Aria2Worker(task_id, task["url"], task["filename"], save_dir, connections, task.get("format_id", ""), tools_conf, max_speed_kbs=max_speed)
         else:
-            # Fallback to direct HTTP with rate limiter
+            # Fallback to direct HTTP with rate limiter and auto-resume
             worker = DirectHttpWorker(task_id, task["url"], task["filename"], save_dir, connections, task.get("format_id", ""), tools_conf, max_speed_kbs=max_speed)
 
         worker.progress_signal.connect(self._on_worker_progress)
@@ -1490,14 +2072,16 @@ class MainWindow(QMainWindow):
         # Update row if visible
         for row in range(self.table.rowCount()):
             if self.table.item(row, 0) and self.table.item(row, 0).text() == str(task_id):
-                # Update total size display if known
-                if tot > 0 and self.table.item(row, 2):
-                    self.table.item(row, 2).setText(f"{tot / (1024*1024):.2f} MB")
-                # Update progress bar
+                # Update Size column with live downloaded / total visual
+                if self.table.item(row, 2):
+                    self.table.item(row, 2).setText(format_size_pair(dl, tot, "downloading"))
+                    self.table.item(row, 2).setToolTip(f"Downloaded: {format_file_size(dl)}\nTotal Size: {format_file_size(tot)}")
+                # Update progress bar with live percentage and numbers
                 widget = self.table.cellWidget(row, 3)
                 if isinstance(widget, QProgressBar):
                     widget.setValue(int(pct))
-                    widget.setFormat(f"{pct:.1f}%")
+                    widget.setFormat(format_progress_text(pct, dl, tot, "downloading"))
+                    widget.setToolTip(f"Progress: {pct:.1f}%\nDownloaded: {format_file_size(dl)} / {format_file_size(tot)}")
                 # Update speed
                 if self.table.item(row, 4):
                     self.table.item(row, 4).setText(spd)
@@ -1513,22 +2097,72 @@ class MainWindow(QMainWindow):
             if task_id in self.active_workers:
                 del self.active_workers[task_id]
         self._load_downloads()
+        self._check_all_finished()
 
     def _on_worker_finished(self, task_id: int, file_path: str):
         self.db.update_status(task_id, "completed")
         if task_id in self.active_workers:
             del self.active_workers[task_id]
         self._load_downloads()
-        self.status_bar.showMessage(f"Download Finished: {os.path.basename(file_path)}", 5000)
+        fn = os.path.basename(file_path)
+        self.status_bar.showMessage(f"Download Finished: {fn}", 5000)
+        self._check_all_finished()
+
+        # Post-download automation hooks
+        if file_path and os.path.exists(file_path):
+            if self.db.get_setting("auto_antivirus_scan", "false") == "true":
+                threading.Thread(target=self._run_bg_defender_scan, args=(file_path,), daemon=True).start()
+            if self.db.get_setting("auto_extract_archives", "false") == "true" and is_extractable_archive(file_path):
+                threading.Thread(target=self._run_bg_archive_extract, args=(file_path,), daemon=True).start()
+
+    def _run_bg_defender_scan(self, file_path: str):
+        clean, msg = run_windows_defender_scan(file_path)
+        fn = os.path.basename(file_path)
+        if clean:
+            self.status_bar.showMessage(f"Defender Scan Passed: {fn}", 5000)
+        else:
+            self.status_bar.showMessage(f"Defender Warning: {fn} - {msg}", 8000)
+
+    def _run_bg_archive_extract(self, file_path: str):
+        ok, msg = extract_archive_safe(file_path)
+        fn = os.path.basename(file_path)
+        if ok:
+            self.status_bar.showMessage(f"Archive Extracted: {fn}", 5000)
+        else:
+            self.status_bar.showMessage(f"Extraction Error: {fn} - {msg}", 6000)
+
+    def _check_all_finished(self):
+        if len(self.active_workers) == 0:
+            all_dl = self.db.get_all_downloads()
+            queued = any(t.get("status") == "queued" for t in all_dl)
+            if not queued:
+                allow_sleep()
+                if self.db.get_setting("auto_shutdown", "false") == "true":
+                    QTimer.singleShot(600, self._trigger_auto_shutdown)
+
+    def _toggle_auto_shutdown(self, checked: bool):
+        self.db.set_setting("auto_shutdown", "true" if checked else "false")
+        state_str = "Enabled" if checked else "Disabled"
+        self.status_bar.showMessage(f"Auto-Shutdown on Completion: {state_str}", 4000)
+
+    def _trigger_auto_shutdown(self):
+        if len(self.active_workers) > 0:
+            return
+        dlg = AutoShutdownCountdownDialog(self, countdown_seconds=30)
+        dlg.exec()
+        if dlg.cancelled:
+            self.autoshutdown_act.setChecked(False)
+            self.db.set_setting("auto_shutdown", "false")
+            self.status_bar.showMessage("Auto-shutdown was cancelled by user.", 6000)
 
     def _process_queue(self):
         max_conc = int(self.db.get_setting("max_concurrent", "3"))
         if len(self.active_workers) >= max_conc:
             return
 
-        all_tasks = self.db.get_all_downloads()
-        for t in all_tasks:
-            if t["status"] == "queued" and t["id"] not in self.active_workers:
+        queued_tasks = self.db.get_ordered_queued_downloads()
+        for t in queued_tasks:
+            if t["id"] not in self.active_workers:
                 self._start_task(t["id"])
                 if len(self.active_workers) >= max_conc:
                     break
@@ -1670,47 +2304,98 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
 
-        res_act = menu.addAction("▶ Resume / Start")
+        res_act = menu.addAction("Resume / Start")
         res_act.setEnabled(not is_active and st in ("paused", "cancelled", "failed", "queued", "scheduled"))
         res_act.triggered.connect(self._resume_selected)
 
-        pause_act = menu.addAction("⏸ Pause")
+        pause_act = menu.addAction("Pause")
         pause_act.setEnabled(is_active)
         pause_act.triggered.connect(self._pause_selected)
 
-        cancel_act = menu.addAction("⏹ Cancel")
+        cancel_act = menu.addAction("Cancel")
         cancel_act.setEnabled(is_active)
         cancel_act.triggered.connect(self._cancel_selected)
 
-        restart_act = menu.addAction("🔄 Restart Download")
+        restart_act = menu.addAction("Restart Download")
         restart_act.triggered.connect(self._restart_selected)
 
         menu.addSeparator()
 
-        sched_act = menu.addAction("⏰ Schedule Start Time...")
+        sched_act = menu.addAction("Schedule Start Time...")
         sched_act.triggered.connect(self._schedule_selected)
+
+        if st == "queued":
+            menu.addSeparator()
+            q_top = menu.addAction("Move to Top (Priority)")
+            q_top.triggered.connect(lambda: self._move_queue_selected("top"))
+            q_up = menu.addAction("Move Up")
+            q_up.triggered.connect(lambda: self._move_queue_selected("up"))
+            q_down = menu.addAction("Move Down")
+            q_down.triggered.connect(lambda: self._move_queue_selected("down"))
+            q_bot = menu.addAction("Move to Bottom")
+            q_bot.triggered.connect(lambda: self._move_queue_selected("bottom"))
 
         menu.addSeparator()
 
-        open_f = menu.addAction("📄 Open File")
+        open_f = menu.addAction("Open File")
         open_f.setEnabled(file_exists)
         open_f.triggered.connect(self._open_selected_file)
 
-        open_d = menu.addAction("📁 Open Folder")
+        open_d = menu.addAction("Open Folder")
         open_d.triggered.connect(self._open_selected_folder)
 
-        copy_u = menu.addAction("🔗 Copy Download Link")
+        if file_exists:
+            menu.addSeparator()
+            chk_act = menu.addAction("Verify Checksum (MD5 / SHA256)...")
+            chk_act.triggered.connect(lambda: self._open_checksum_dialog(file_path))
+
+            av_act = menu.addAction("Scan with Windows Defender")
+            av_act.triggered.connect(lambda: self._scan_defender_selected(file_path))
+
+            if is_extractable_archive(file_path):
+                ext_act = menu.addAction("Extract Archive Here...")
+                ext_act.triggered.connect(lambda: self._extract_archive_selected(file_path))
+
+        copy_u = menu.addAction("Copy Download Link")
         copy_u.triggered.connect(self._copy_selected_url)
 
         menu.addSeparator()
 
-        del_task = menu.addAction("🗑 Delete Task from History")
+        del_task = menu.addAction("Delete Task from History")
         del_task.triggered.connect(self._delete_selected)
 
-        del_both = menu.addAction("❌ Delete Task and File from Disk")
+        del_both = menu.addAction("Delete Task and File from Disk")
         del_both.triggered.connect(self._delete_selected_with_file)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _move_queue_selected(self, direction: str):
+        t_id = self._get_selected_task_id()
+        if t_id and self.db.move_queue(t_id, direction):
+            self._load_downloads()
+            self.status_bar.showMessage(f"Reordered task #{t_id} {direction} in queue.", 2500)
+
+    def _open_checksum_dialog(self, file_path: str):
+        dlg = ChecksumDialog(file_path, self)
+        dlg.exec()
+
+    def _scan_defender_selected(self, file_path: str):
+        self.status_bar.showMessage(f"Running Defender scan on {os.path.basename(file_path)}...", 3000)
+        def _scan():
+            clean, msg = run_windows_defender_scan(file_path)
+            fn = os.path.basename(file_path)
+            if clean:
+                self.status_bar.showMessage(f"Defender Clean: {fn} - {msg}", 6000)
+            else:
+                self.status_bar.showMessage(f"Defender ALERT: {fn} - {msg}", 8000)
+        threading.Thread(target=_scan, daemon=True).start()
+
+    def _extract_archive_selected(self, file_path: str):
+        self.status_bar.showMessage(f"Extracting {os.path.basename(file_path)}...", 3000)
+        def _extract():
+            ok, msg = extract_archive_safe(file_path)
+            self.status_bar.showMessage(msg, 6000)
+        threading.Thread(target=_extract, daemon=True).start()
 
     def _update_status_bar(self):
         active_count = len(self.active_workers)

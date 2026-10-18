@@ -10,7 +10,9 @@ import time
 import shutil
 import subprocess
 import urllib.parse
-# urllib.request
+import urllib.request
+import urllib.error
+import ctypes
 from typing import Dict, Any, List, Optional, Tuple
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
@@ -52,6 +54,49 @@ def find_tool_binary(tool_name: str, custom_path: str = "") -> Optional[str]:
     return None
 
 
+def prevent_sleep():
+    """Prevents Windows system and network from going to sleep during active downloads."""
+    if sys.platform == "win32":
+        try:
+            # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001 | 0x00000040)
+        except Exception:
+            pass
+
+
+def allow_sleep():
+    """Restores default Windows power management state when idle."""
+    if sys.platform == "win32":
+        try:
+            # ES_CONTINUOUS
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+        except Exception:
+            pass
+
+
+def parse_size_to_bytes(s: str) -> int:
+    """Converts human readable size string (e.g. '1.5GiB', '500MB') to byte count."""
+    if not s:
+        return 0
+    units = {
+        "B": 1,
+        "K": 1024, "KB": 1024, "KIB": 1024,
+        "M": 1024**2, "MB": 1024**2, "MIB": 1024**2,
+        "G": 1024**3, "GB": 1024**3, "GIB": 1024**3,
+        "T": 1024**4, "TB": 1024**4, "TIB": 1024**4
+    }
+    m = re.match(r'^([0-9.]+)\s*([A-Za-z]+)?$', s.strip())
+    if not m:
+        return 0
+    val, u = m.groups()
+    try:
+        mult = units.get(u.upper() if u else "B", 1)
+        return int(float(val) * mult)
+    except Exception:
+        return 0
+
+
+
 class UrlAnalyzerThread(QThread):
     """Probes a URL to determine filename, size, and available media stream formats."""
     analysis_complete = pyqtSignal(dict)
@@ -85,12 +130,15 @@ class UrlAnalyzerThread(QThread):
         # 1. Probe with yt-dlp only if not an obvious static direct file extension
         if yt_dlp is not None and not has_direct_ext:
             try:
+                deno_bin = find_tool_binary("deno", self.tools.get("deno_path", ""))
+                if deno_bin:
+                    os.environ["PATH"] = os.path.dirname(deno_bin) + os.pathsep + os.environ.get("PATH", "")
+
                 ydl_opts = {
                     "quiet": True,
                     "no_warnings": True,
                     "extract_flat": False,
-                    "skip_download": True,
-                    "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}}
+                    "skip_download": True
                 }
                 ffmpeg_bin = find_tool_binary("ffmpeg", self.tools.get("ffmpeg_path", ""))
                 if ffmpeg_bin:
@@ -112,28 +160,85 @@ class UrlAnalyzerThread(QThread):
                         formats_list = []
                         formats_list.append({
                             "id": "bestvideo+bestaudio/best",
-                            "label": "Best Quality (Auto Video + Audio)",
+                            "label": "Best Available (Auto Highest Quality)",
                             "ext": "mp4"
                         })
                         
-                        seen_res = set()
                         raw_formats = info.get("formats", [])
+                        video_fmts = []
                         for f in raw_formats:
-                            height = f.get("height")
-                            f_id = f.get("format_id")
-                            vcodec = f.get("vcodec", "none")
-                            if height and height not in seen_res and vcodec != "none":
-                                seen_res.add(height)
-                                formats_list.append({
-                                    "id": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
-                                    "label": f"{height}p Video ({f.get('ext', 'mp4')})",
-                                    "ext": f.get("ext", "mp4")
-                                })
+                            fid = str(f.get("format_id", ""))
+                            if fid.startswith("sb") or f.get("ext") == "mhtml":
+                                continue
+                            vc = f.get("vcodec") or "none"
+                            if vc == "none":
+                                continue
+                            h = f.get("height") or 0
+                            if h <= 0:
+                                continue
+                            fps = f.get("fps") or 30
+                            f_ext = f.get("ext", "mp4")
+                            sz = f.get("filesize") or f.get("filesize_approx") or 0
+                            tbr = f.get("tbr") or 0
+                            ac = f.get("acodec") or "none"
+                            video_fmts.append({
+                                "fid": fid,
+                                "height": int(h),
+                                "fps": int(fps) if fps else 30,
+                                "ext": f_ext,
+                                "sz": sz,
+                                "tbr": tbr,
+                                "has_audio": ac != "none"
+                            })
 
+                        # Sort: Height desc, FPS desc, known size first, size desc, bitrate desc
+                        video_fmts.sort(key=lambda x: (x["height"], x["fps"], 1 if x["sz"] > 0 else 0, x["sz"], x["tbr"]), reverse=True)
+
+                        seen_signatures = set()
+                        for vf in video_fmts:
+                            h = vf["height"]
+                            fps = vf["fps"]
+                            f_ext = vf["ext"]
+                            fps_key = 60 if fps >= 45 else 30
+                            sig = (h, fps_key, f_ext)
+                            if sig in seen_signatures:
+                                continue
+                            seen_signatures.add(sig)
+
+                            if h >= 2160: quality_name = "4K Ultra HD"
+                            elif h >= 1440: quality_name = "2K Quad HD"
+                            elif h >= 1080: quality_name = "Full HD"
+                            elif h >= 720: quality_name = "HD"
+                            elif h >= 480: quality_name = "SD"
+                            else: quality_name = "Low"
+
+                            fps_str = "60fps" if fps >= 45 else ""
+                            res_str = f"{h}p{fps_str}" if fps_str else f"{h}p"
+                            parts = [f"{res_str} {quality_name}", f_ext.upper()]
+                            if vf["sz"] > 0:
+                                mb = vf["sz"] / (1024 * 1024)
+                                parts.append(f"~{mb:.1f} MB" if mb < 1024 else f"~{mb/1024:.2f} GB")
+
+                            label = " • ".join(parts)
+                            fmt_id = f"{vf['fid']}/best" if vf["has_audio"] else f"{vf['fid']}+bestaudio/best"
+
+                            formats_list.append({
+                                "id": fmt_id,
+                                "label": label,
+                                "ext": f_ext,
+                                "height": h
+                            })
+
+                        # Audio options
                         formats_list.append({
                             "id": "bestaudio/best",
-                            "label": "Audio Only (MP3 / Best Audio)",
+                            "label": "Audio Only - MP3 (High Quality 192k/320k)",
                             "ext": "mp3"
+                        })
+                        formats_list.append({
+                            "id": "bestaudio[ext=m4a]/bestaudio",
+                            "label": "Audio Only - M4A (Original AAC)",
+                            "ext": "m4a"
                         })
 
                         result["formats"] = formats_list
@@ -224,6 +329,7 @@ class Aria2Worker(BaseDownloadWorker):
     """Executes multi-segmented downloads with aria2c.exe."""
     
     def run(self):
+        prevent_sleep()
         aria2_bin = find_tool_binary("aria2c", self.tools.get("aria2_path", ""))
         if not aria2_bin:
             self.status_signal.emit(self.task_id, "failed", "aria2c executable not found")
@@ -238,6 +344,13 @@ class Aria2Worker(BaseDownloadWorker):
             f"-s{self.connections}",
             f"-x{self.connections}",
             "-k1M",
+            "--file-allocation=none",
+            "--check-certificate=false",
+            "--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "--timeout=60",
+            "--connect-timeout=30",
+            "--max-tries=10",
+            "--retry-wait=2",
             "--summary-interval=1",
             "--show-console-readout=false",
             f"--dir={self.save_dir}",
@@ -282,14 +395,20 @@ class Aria2Worker(BaseDownloadWorker):
                 m = progress_regex.search(line)
                 if m:
                     dl_str, tot_str, pct_str, spd_str, eta_str = m.groups()
-                    pct = float(pct_str)
+                    try:
+                        pct = float(pct_str)
+                    except ValueError:
+                        pct = 0.0
+                    dl_bytes = parse_size_to_bytes(dl_str)
+                    tot_bytes = parse_size_to_bytes(tot_str)
                     speed_display = f"{spd_str}/s"
                     eta_display = eta_str if eta_str else "--"
-                    self.progress_signal.emit(self.task_id, 0, 0, speed_display, eta_display, pct)
+                    self.progress_signal.emit(self.task_id, dl_bytes, tot_bytes, speed_display, eta_display, pct)
 
             rc = self.process.wait()
             if rc == 0 and os.path.exists(out_file):
-                self.progress_signal.emit(self.task_id, 0, 0, "0 KB/s", "00:00", 100.0)
+                final_size = os.path.getsize(out_file)
+                self.progress_signal.emit(self.task_id, final_size, final_size, "0 KB/s", "00:00", 100.0)
                 self.status_signal.emit(self.task_id, "completed", "")
                 self.finished_signal.emit(self.task_id, out_file)
             elif not self.is_paused and not self.is_cancelled:
@@ -306,6 +425,10 @@ class YtDlpWorker(BaseDownloadWorker):
         if yt_dlp is None:
             self.status_signal.emit(self.task_id, "failed", "yt-dlp is not available")
             return
+
+        deno_bin = find_tool_binary("deno", self.tools.get("deno_path", ""))
+        if deno_bin:
+            os.environ["PATH"] = os.path.dirname(deno_bin) + os.pathsep + os.environ.get("PATH", "")
 
         os.makedirs(self.save_dir, exist_ok=True)
         base_out = os.path.join(self.save_dir, "%(title)s.%(ext)s")
@@ -335,7 +458,6 @@ class YtDlpWorker(BaseDownloadWorker):
             "progress_hooks": [progress_hook],
             "quiet": True,
             "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
             "format": self.format_id or "bestvideo+bestaudio/best"
         }
 
@@ -344,14 +466,20 @@ class YtDlpWorker(BaseDownloadWorker):
 
         if ffmpeg_bin:
             ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
-            # If user selected audio-only, extract and transcode to MP3
+            # If user selected audio-only, extract and transcode to requested format
             if self.format_id == "bestaudio/best" or self.filename.lower().endswith(".mp3"):
                 ydl_opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
                     "preferredquality": "192",
                 }]
-        elif self.format_id == "bestvideo+bestaudio/best":
+            elif self.format_id.startswith("bestaudio[ext=m4a]") or self.filename.lower().endswith(".m4a"):
+                ydl_opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                    "preferredquality": "192",
+                }]
+        elif "+" in self.format_id:
             # If FFmpeg is missing, prefer single container format to avoid unmerged streams
             ydl_opts["format"] = "best[ext=mp4]/best"
 
@@ -368,7 +496,8 @@ class YtDlpWorker(BaseDownloadWorker):
                         filename = mp3_path
                 
             if os.path.exists(filename):
-                self.progress_signal.emit(self.task_id, 0, 0, "0 KB/s", "00:00", 100.0)
+                final_sz = os.path.getsize(filename)
+                self.progress_signal.emit(self.task_id, final_sz, final_sz, "0 KB/s", "00:00", 100.0)
                 self.status_signal.emit(self.task_id, "completed", "")
                 self.finished_signal.emit(self.task_id, filename)
             else:
@@ -383,75 +512,130 @@ class YtDlpWorker(BaseDownloadWorker):
 
 
 class DirectHttpWorker(BaseDownloadWorker):
-    """Pure Python chunked HTTP/HTTPS downloader fallback with rate limiting."""
+    """Pure Python chunked HTTP/HTTPS downloader fallback with rate limiting and auto-resume."""
 
     def run(self):
-        # urllib.request
+        prevent_sleep()
         os.makedirs(self.save_dir, exist_ok=True)
         out_file = os.path.join(self.save_dir, self.filename)
 
-        downloaded = 0
-        if os.path.exists(out_file):
-            downloaded = os.path.getsize(out_file)
+        max_retries = 10
+        retry_delay = 2.0
+        total = 0
 
-        req = urllib.request.Request(self.url, headers={"User-Agent": "Mozilla/5.0"})
-        if downloaded > 0:
-            req.add_header("Range", f"bytes={downloaded}-")
+        self.status_signal.emit(self.task_id, "downloading", "")
 
-        try:
-            self.status_signal.emit(self.task_id, "downloading", "")
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                total = int(resp.headers.get("Content-Length", 0)) + downloaded
-                mode = "ab" if downloaded > 0 else "wb"
-                
-                start_time = time.time()
-                last_update = start_time
-                bytes_since_update = 0
+        for attempt in range(max_retries):
+            if self.is_paused:
+                self.status_signal.emit(self.task_id, "paused", "")
+                return
+            if self.is_cancelled:
+                self.status_signal.emit(self.task_id, "cancelled", "")
+                return
 
-                with open(out_file, mode) as f:
-                    while True:
-                        if self.is_paused:
-                            self.status_signal.emit(self.task_id, "paused", "")
-                            return
-                        if self.is_cancelled:
-                            self.status_signal.emit(self.task_id, "cancelled", "")
-                            return
+            downloaded = os.path.getsize(out_file) if os.path.exists(out_file) else 0
 
-                        chunk_start = time.time()
-                        chunk = resp.read(64 * 1024)
-                        if not chunk:
-                            break
+            req = urllib.request.Request(
+                self.url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "*/*",
+                    "Connection": "keep-alive"
+                }
+            )
+            if downloaded > 0:
+                req.add_header("Range", f"bytes={downloaded}-")
 
-                        f.write(chunk)
-                        chunk_len = len(chunk)
-                        downloaded += chunk_len
-                        bytes_since_update += chunk_len
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    resp_len = resp.headers.get("Content-Length")
+                    if resp_len and resp_len.isdigit():
+                        seg_len = int(resp_len)
+                        total = downloaded + seg_len
+                    elif total == 0:
+                        total = downloaded
 
-                        # Speed limiter throttle for direct HTTP
-                        if self.max_speed_kbs > 0:
-                            expected_time = chunk_len / (self.max_speed_kbs * 1024)
-                            chunk_elapsed = time.time() - chunk_start
-                            if expected_time > chunk_elapsed:
-                                sleep_sec = min(1.0, expected_time - chunk_elapsed)
-                                time.sleep(sleep_sec)
+                    mode = "ab" if downloaded > 0 else "wb"
+                    start_time = time.time()
+                    last_update = start_time
+                    bytes_since_update = 0
 
-                        now = time.time()
-                        if now - last_update >= 0.5:
-                            duration = now - last_update
-                            speed = bytes_since_update / duration
-                            speed_str = f"{speed / (1024*1024):.2f} MB/s" if speed >= 1048576 else f"{speed / 1024:.2f} KB/s"
-                            remaining = (total - downloaded) if total > downloaded else 0
-                            eta_sec = int(remaining / speed) if speed > 0 else 0
-                            eta_str = f"{eta_sec // 60:02d}:{eta_sec % 60:02d}"
-                            pct = (downloaded / total * 100.0) if total > 0 else 0.0
+                    with open(out_file, mode) as f:
+                        while True:
+                            if self.is_paused:
+                                self.status_signal.emit(self.task_id, "paused", "")
+                                return
+                            if self.is_cancelled:
+                                self.status_signal.emit(self.task_id, "cancelled", "")
+                                return
 
-                            self.progress_signal.emit(self.task_id, downloaded, total, speed_str, eta_str, pct)
-                            last_update = now
-                            bytes_since_update = 0
+                            chunk_start = time.time()
+                            chunk = resp.read(64 * 1024)
+                            if not chunk:
+                                break
 
-            self.progress_signal.emit(self.task_id, downloaded, total, "0 KB/s", "00:00", 100.0)
-            self.status_signal.emit(self.task_id, "completed", "")
-            self.finished_signal.emit(self.task_id, out_file)
-        except Exception as e:
-            if not self.is_paused and not self.is_cancelled:
-                self.status_signal.emit(self.task_id, "failed", str(e))
+                            f.write(chunk)
+                            chunk_len = len(chunk)
+                            downloaded += chunk_len
+                            bytes_since_update += chunk_len
+
+                            # Speed limiter throttle for direct HTTP
+                            if self.max_speed_kbs > 0:
+                                expected_time = chunk_len / (self.max_speed_kbs * 1024)
+                                chunk_elapsed = time.time() - chunk_start
+                                if expected_time > chunk_elapsed:
+                                    sleep_sec = min(1.0, expected_time - chunk_elapsed)
+                                    time.sleep(sleep_sec)
+
+                            now = time.time()
+                            if now - last_update >= 0.5:
+                                duration = now - last_update
+                                speed = bytes_since_update / duration
+                                speed_str = f"{speed / (1024*1024):.2f} MB/s" if speed >= 1048576 else f"{speed / 1024:.2f} KB/s"
+                                remaining = (total - downloaded) if total > downloaded else 0
+                                eta_sec = int(remaining / speed) if speed > 0 else 0
+                                eta_str = f"{eta_sec // 60:02d}:{eta_sec % 60:02d}"
+                                pct = (downloaded / total * 100.0) if total > 0 else 0.0
+
+                                self.progress_signal.emit(self.task_id, downloaded, total, speed_str, eta_str, pct)
+                                last_update = now
+                                bytes_since_update = 0
+
+                # Finished successfully
+                self.progress_signal.emit(self.task_id, downloaded, total, "0 KB/s", "00:00", 100.0)
+                self.status_signal.emit(self.task_id, "completed", "")
+                self.finished_signal.emit(self.task_id, out_file)
+                return
+
+            except urllib.error.HTTPError as he:
+                if self.is_paused:
+                    self.status_signal.emit(self.task_id, "paused", "")
+                    return
+                if self.is_cancelled:
+                    self.status_signal.emit(self.task_id, "cancelled", "")
+                    return
+                # Permanent client errors (404, 403, 401, etc.) fail immediately
+                if he.code in (400, 401, 403, 404, 405, 410, 416):
+                    self.status_signal.emit(self.task_id, "failed", f"HTTP {he.code}: {he.reason}")
+                    return
+                # Server 5xx errors can be retried
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    self.status_signal.emit(self.task_id, "failed", str(he))
+                    return
+
+            except Exception as e:
+                if self.is_paused:
+                    self.status_signal.emit(self.task_id, "paused", "")
+                    return
+                if self.is_cancelled:
+                    self.status_signal.emit(self.task_id, "cancelled", "")
+                    return
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    self.status_signal.emit(self.task_id, "failed", str(e))
+                    return

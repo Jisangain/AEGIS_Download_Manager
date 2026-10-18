@@ -107,11 +107,11 @@ def run_ui_tests():
         # Test 2: Status Badges, Icons, and Progress Bars
         # -------------------------------------------------------------
         print("\n--- Test 2: Visual Elements (Icons, Badges, Progress Bars) ---")
-        assert get_category_icon("video.mp4") == "🎬"
-        assert get_category_icon("song.mp3") == "🎵"
-        assert get_category_icon("sheet.xlsx") == "📄"
-        assert get_category_icon("bundle.zip") == "📦"
-        assert get_category_icon("installer.exe") == "⚡"
+        assert get_category_icon("video.mp4") == ""
+        assert get_category_icon("song.mp3") == ""
+        assert get_category_icon("sheet.xlsx") == ""
+        assert get_category_icon("bundle.zip") == ""
+        assert get_category_icon("installer.exe") == ""
 
         disp_comp, color_comp = format_status("completed")
         assert "Completed" in disp_comp and color_comp == "#10B981"
