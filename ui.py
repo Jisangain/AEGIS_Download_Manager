@@ -1865,7 +1865,8 @@ class MainWindow(QMainWindow):
 
         # macOS Right Inspector / Details Panel
         self.inspector_panel = QWidget()
-        self.inspector_panel.setFixedWidth(290)
+        self.inspector_panel.setMinimumWidth(220)
+        self.inspector_panel.setMaximumWidth(460)
         self.inspector_panel.setStyleSheet("""
             QWidget {
                 background-color: #1E1E23;
