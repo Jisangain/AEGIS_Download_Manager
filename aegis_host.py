@@ -141,6 +141,14 @@ def launch_aegis(executable_path: str) -> bool:
     """Launches the Aegis desktop application in a detached process."""
     log_debug(f"Launching desktop application: {executable_path}")
     try:
+        if sys.platform == "win32" and not executable_path.lower().endswith(".py"):
+            try:
+                os.startfile(executable_path)
+                log_debug("Launched Aegis via os.startfile successfully")
+                return True
+            except Exception as e_startfile:
+                log_debug(f"os.startfile failed ({e_startfile}), falling back to Popen")
+
         if executable_path.lower().endswith(".py"):
             py_exe = sys.executable.replace("python.exe", "pythonw.exe")
             if not os.path.isfile(py_exe):
@@ -149,31 +157,15 @@ def launch_aegis(executable_path: str) -> bool:
         else:
             cmd = [executable_path]
 
-        # Use CREATE_BREAKAWAY_FROM_JOB (0x01000000) | DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200)
-        # to ensure the desktop application survives browser and native host process termination.
-        flags = 0x00000208
-        if sys.platform == "win32":
-            flags |= 0x01000000
-
-        try:
-            p = subprocess.Popen(
-                cmd,
-                cwd=os.path.dirname(executable_path),
-                creationflags=flags,
-                close_fds=True
-            )
-            log_debug(f"Spawned Aegis process successfully (PID {p.pid})")
-            return True
-        except Exception as e_breakaway:
-            log_debug(f"Breakaway flags rejected ({e_breakaway}), falling back to standard detached")
-            p = subprocess.Popen(
-                cmd,
-                cwd=os.path.dirname(executable_path),
-                creationflags=0x00000208,
-                close_fds=True
-            )
-            log_debug(f"Spawned Aegis process with fallback flags (PID {p.pid})")
-            return True
+        flags = 0x00000208  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        p = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(executable_path),
+            creationflags=flags,
+            close_fds=True
+        )
+        log_debug(f"Spawned Aegis process with Popen (PID {p.pid})")
+        return True
     except Exception as e:
         log_debug(f"Failed to launch Aegis process: {e}")
         return False

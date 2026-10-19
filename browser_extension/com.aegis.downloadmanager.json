@@ -4,7 +4,7 @@
   "path": "E:\\reverse\\AegisDownloadManager\\browser_extension\\aegis_host.exe",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://olhghfhliadcobalbkamekmbdgcgmhee/",
-    "chrome-extension://icdicciedmiojchchcagghmpkbenkccj/"
+    "chrome-extension://icdicciedmiojchchcagghmpkbenkccj/",
+    "chrome-extension://olhghfhliadcobalbkamekmbdgcgmhee/"
   ]
 }
