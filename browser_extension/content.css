@@ -1,0 +1,172 @@
+/* Aegis Download Manager - Floating Video Sniffer & Download Panel */
+
+#aegis-video-sniffer-panel {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 2147483647; /* Highest z-index to float above HTML5 / YouTube players */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: auto;
+    opacity: 0.95;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#aegis-video-sniffer-panel:hover {
+    opacity: 1;
+    transform: translateY(-1px);
+}
+
+.aegis-main-trigger-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(24, 24, 27, 0.92);
+    color: #F8FAFC;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 20px;
+    padding: 6px 14px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    font-weight: 600;
+    font-size: 11.5px;
+    letter-spacing: 0.2px;
+}
+
+.aegis-main-trigger-btn:hover {
+    background: rgba(36, 36, 41, 0.96);
+    border-color: #007AFF;
+    box-shadow: 0 6px 20px rgba(0, 122, 255, 0.3);
+}
+
+.aegis-shield-icon {
+    width: 14px;
+    height: 14px;
+    fill: #007AFF;
+    filter: drop-shadow(0 0 4px rgba(0, 122, 255, 0.6));
+    flex-shrink: 0;
+}
+
+.aegis-stream-count-badge {
+    background: #007AFF;
+    color: #FFFFFF;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+    margin-left: 2px;
+}
+
+/* Dropdown Menu Popup */
+.aegis-quality-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 250px;
+    background: rgba(24, 24, 27, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    flex-direction: column;
+    gap: 2px;
+    animation: aegis-fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.aegis-quality-dropdown.aegis-open {
+    display: flex;
+}
+
+@keyframes aegis-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.aegis-dropdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px 4px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 4px;
+    color: #94A3B8;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+.aegis-quality-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 8px;
+    color: #F1F5F9;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    font-size: 11px;
+}
+
+.aegis-quality-option:hover {
+    background: rgba(0, 122, 255, 0.2);
+    color: #FFFFFF;
+}
+
+.aegis-opt-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.aegis-opt-badge {
+    background: rgba(255, 255, 255, 0.1);
+    color: #38BDF8;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.aegis-opt-badge.audio {
+    color: #A78BFA;
+    background: rgba(167, 139, 250, 0.15);
+}
+
+.aegis-opt-size {
+    color: #64748B;
+    font-size: 10px;
+    font-family: monospace;
+}
+
+.aegis-success-toast {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background: rgba(16, 185, 129, 0.95);
+    color: #FFFFFF;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    white-space: nowrap;
+    animation: aegis-fade-in 0.2s ease forwards;
+}

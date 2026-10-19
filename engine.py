@@ -35,6 +35,20 @@ except ImportError:
                 pass
 
 
+def is_media_stream_url(url: str) -> bool:
+    """Checks if a URL belongs to a streaming or video hosting platform requiring yt-dlp."""
+    if not url:
+        return False
+    u = url.lower().strip()
+    stream_patterns = [
+        "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com",
+        "twitch.tv", "tiktok.com", "facebook.com", "fb.watch",
+        "twitter.com", "x.com", "instagram.com", "bilibili.com",
+        "soundcloud.com", "bandcamp.com", "rumble.com", "streamable.com"
+    ]
+    return any(p in u for p in stream_patterns)
+
+
 def find_tool_binary(tool_name: str, custom_path: str = "") -> Optional[str]:
     """Finds an executable tool (aria2c.exe, ffmpeg.exe, etc.) across candidate paths."""
     if custom_path and os.path.isfile(custom_path):
@@ -42,15 +56,24 @@ def find_tool_binary(tool_name: str, custom_path: str = "") -> Optional[str]:
         
     exe_name = tool_name if tool_name.endswith(".exe") else f"{tool_name}.exe"
     
-    candidates = [
-        os.path.join(os.path.dirname(__file__), "tools", exe_name),
-        os.path.join("E:\\reverse\\VnA Download Manager\\_internal\\tools", exe_name),
-        shutil.which(tool_name) or "",
-        shutil.which(exe_name) or ""
+    base_dirs = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"),
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "tools"),
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "..", "tools"),
+        r"E:\reverse\AegisDownloadManager\tools",
+        r"E:\reverse\AegisDownloadManager\dist\tools",
+        r"E:\reverse\VnA Download Manager\_internal\tools",
+        getattr(sys, "_MEIPASS", "")
     ]
-    for c in candidates:
-        if c and os.path.isfile(c):
-            return os.path.abspath(c)
+    for b in base_dirs:
+        if b:
+            p = os.path.join(b, exe_name)
+            if os.path.isfile(p):
+                return os.path.abspath(p)
+
+    found = shutil.which(tool_name) or shutil.which(exe_name)
+    if found:
+        return os.path.abspath(found)
     return None
 
 
@@ -128,7 +151,8 @@ class UrlAnalyzerThread(QThread):
         has_direct_ext = any(path_lower.endswith(ext) for ext in direct_exts)
 
         # 1. Probe with yt-dlp only if not an obvious static direct file extension
-        if yt_dlp is not None and not has_direct_ext:
+        is_stream = is_media_stream_url(self.url)
+        if yt_dlp is not None and (is_stream or not has_direct_ext):
             try:
                 deno_bin = find_tool_binary("deno", self.tools.get("deno_path", ""))
                 if deno_bin:
@@ -138,7 +162,8 @@ class UrlAnalyzerThread(QThread):
                     "quiet": True,
                     "no_warnings": True,
                     "extract_flat": False,
-                    "skip_download": True
+                    "skip_download": True,
+                    "noplaylist": True
                 }
                 ffmpeg_bin = find_tool_binary("ffmpeg", self.tools.get("ffmpeg_path", ""))
                 if ffmpeg_bin:
@@ -149,7 +174,7 @@ class UrlAnalyzerThread(QThread):
                     extractor = info.get("extractor", "").lower()
                     
                     # Avoid yt-dlp's generic HTTP fallback if it's just a file
-                    if info and extractor != "generic":
+                    if info and (extractor != "generic" or is_stream):
                         title = info.get("title", "video")
                         ext = info.get("ext", "mp4")
                         clean_title = re.sub(r'[\\/*?:"<>|]', "_", title)
@@ -245,7 +270,33 @@ class UrlAnalyzerThread(QThread):
                         self.analysis_complete.emit(result)
                         return
             except Exception:
-                pass
+                if is_stream:
+                    # Provide reliable fallback format choices for stream download
+                    result["filename"] = "YouTube_Video.mp4"
+                    result["is_media"] = True
+                    result["engine"] = "ytdlp"
+                    result["formats"] = [
+                        {"id": "bestvideo+bestaudio/best", "label": "Best Available (4K / 1080p)", "ext": "mp4"},
+                        {"id": "bestvideo[height<=1080]+bestaudio/best", "label": "1080p Full HD", "ext": "mp4"},
+                        {"id": "bestvideo[height<=720]+bestaudio/best", "label": "720p HD", "ext": "mp4"},
+                        {"id": "bestaudio/best", "label": "Audio Only (MP3)", "ext": "mp3"}
+                    ]
+                    self.analysis_complete.emit(result)
+                    return
+
+        # If this is a video stream site, never fallback to raw HTTP probing
+        if is_stream:
+            result["filename"] = "YouTube_Video.mp4"
+            result["is_media"] = True
+            result["engine"] = "ytdlp"
+            result["formats"] = [
+                {"id": "bestvideo+bestaudio/best", "label": "Best Available (4K / 1080p)", "ext": "mp4"},
+                {"id": "bestvideo[height<=1080]+bestaudio/best", "label": "1080p Full HD", "ext": "mp4"},
+                {"id": "bestvideo[height<=720]+bestaudio/best", "label": "720p HD", "ext": "mp4"},
+                {"id": "bestaudio/best", "label": "Audio Only (MP3)", "ext": "mp3"}
+            ]
+            self.analysis_complete.emit(result)
+            return
 
         # 2. Standard HTTP/HTTPS Direct Link Probe
         try:
@@ -431,7 +482,12 @@ class YtDlpWorker(BaseDownloadWorker):
             os.environ["PATH"] = os.path.dirname(deno_bin) + os.pathsep + os.environ.get("PATH", "")
 
         os.makedirs(self.save_dir, exist_ok=True)
-        base_out = os.path.join(self.save_dir, "%(title)s.%(ext)s")
+        if self.filename and not self.filename.startswith("download"):
+            base_name, _ = os.path.splitext(self.filename)
+            clean_name = re.sub(r'[\\/*?:"<>|]', "_", base_name)
+            base_out = os.path.join(self.save_dir, f"{clean_name}.%(ext)s")
+        else:
+            base_out = os.path.join(self.save_dir, "%(title)s.%(ext)s")
 
         ffmpeg_bin = find_tool_binary("ffmpeg", self.tools.get("ffmpeg_path", ""))
 
@@ -458,7 +514,8 @@ class YtDlpWorker(BaseDownloadWorker):
             "progress_hooks": [progress_hook],
             "quiet": True,
             "no_warnings": True,
-            "format": self.format_id or "bestvideo+bestaudio/best"
+            "format": self.format_id or "bestvideo+bestaudio/best",
+            "noplaylist": True
         }
 
         if self.max_speed_kbs > 0:

@@ -141,8 +141,36 @@ def main():
             audio_only = "--audio-only" in sys.argv
             sys.exit(run_cli_download(target_url, dest, audio_only=audio_only))
 
+    # IDM-compatible /d, -d, --url arguments
+    url_to_add = None
+    fn_to_add = None
+    fmt_to_add = None
+    for i, arg in enumerate(sys.argv):
+        if arg in ("/d", "-d", "--url") and i + 1 < len(sys.argv):
+            url_to_add = sys.argv[i + 1]
+        elif arg in ("/f", "-f", "--filename") and i + 1 < len(sys.argv):
+            fn_to_add = sys.argv[i + 1]
+        elif arg in ("/format", "--format") and i + 1 < len(sys.argv):
+            fmt_to_add = sys.argv[i + 1]
+
+    if url_to_add:
+        from ipc_server import send_ipc_message
+        msg = {
+            "action": "download",
+            "url": url_to_add,
+            "filename": fn_to_add or "",
+            "format_id": fmt_to_add or ""
+        }
+        res = send_ipc_message(msg, timeout_ms=1000)
+        if res and res.get("status") == "ok":
+            sys.exit(0)
+
     window = MainWindow()
     window.show()
+
+    if url_to_add:
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(200, lambda: window._on_browser_ipc_message(msg))
 
     sys.exit(app.exec())
 

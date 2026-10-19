@@ -24,7 +24,7 @@ from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard,
 from database import Database
 from engine import (
     UrlAnalyzerThread, Aria2Worker, YtDlpWorker, DirectHttpWorker,
-    find_tool_binary, prevent_sleep, allow_sleep
+    find_tool_binary, prevent_sleep, allow_sleep, is_media_stream_url
 )
 from ipc_server import AegisIpcServer
 from automation import (
@@ -612,7 +612,31 @@ class BatchImportDialog(QDialog):
                     )
                     self.added_count += 1
 
-        self.accept()
+def force_foreground_window(hwnd: int):
+    """Brings a window to the top of the Z-order and into foreground across Windows processes."""
+    if sys.platform != "win32":
+        return
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        user32.AllowSetForegroundWindow(-1)
+        fg_hwnd = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        cur_thread = kernel32.GetCurrentThreadId()
+        attached = False
+        if fg_thread != 0 and fg_thread != cur_thread:
+            attached = bool(user32.AttachThreadInput(cur_thread, fg_thread, True))
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)  # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
+        user32.SetFocus(hwnd)
+        # Reset topmost to regular top so it doesn't freeze permanently on top of all desktops
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)  # HWND_NOTOPMOST
+        if attached:
+            user32.AttachThreadInput(cur_thread, fg_thread, False)
+    except Exception:
+        pass
 
 
 class AddDownloadDialog(QDialog):
@@ -624,6 +648,7 @@ class AddDownloadDialog(QDialog):
         self.resize(580, 400)
         self.analyzer_thread: Optional[UrlAnalyzerThread] = None
         self.analyzed_result: Dict[str, Any] = {}
+        self.preferred_format_id: str = ""
         self._init_ui()
         self._check_clipboard()
 
@@ -631,15 +656,19 @@ class AddDownloadDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # URL Input
-        url_layout = QHBoxLayout()
+        self.url_layout = QHBoxLayout()
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("Paste download link (HTTP, HTTPS, YouTube, direct file...)")
+        self.url_debounce_timer = QTimer(self)
+        self.url_debounce_timer.setSingleShot(True)
+        self.url_debounce_timer.setInterval(450)
+        self.url_debounce_timer.timeout.connect(self._analyze_url)
+        self.url_input.textChanged.connect(self._on_url_input_changed)
         self.analyze_btn = QPushButton("Analyze Link")
         self.analyze_btn.clicked.connect(self._analyze_url)
-        url_layout.addWidget(self.url_input)
-        url_layout.addWidget(self.analyze_btn)
-        layout.addLayout(url_layout)
+        self.url_layout.addWidget(self.url_input)
+        self.url_layout.addWidget(self.analyze_btn)
+        layout.addLayout(self.url_layout)
 
         # Status / Feedback label
         self.status_lbl = QLabel("Enter a URL and click Analyze, or start direct download.")
@@ -726,9 +755,21 @@ class AddDownloadDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _check_clipboard(self):
+        if self.url_input.text().strip():
+            return
         cb = QGuiApplication.clipboard().text().strip()
         if cb.startswith("http://") or cb.startswith("https://"):
             self.url_input.setText(cb)
+            QTimer.singleShot(150, self._analyze_url)
+
+    def _on_url_input_changed(self, text: str):
+        u = text.strip()
+        if u.startswith("http://") or u.startswith("https://"):
+            if is_media_stream_url(u):
+                self.status_lbl.setText("Media stream detected (YouTube/Video). Preparing formats...")
+            else:
+                self.status_lbl.setText("Analyzing target URL...")
+            self.url_debounce_timer.start()
 
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Download Folder", self.save_input.text())
@@ -737,16 +778,23 @@ class AddDownloadDialog(QDialog):
 
     def _analyze_url(self):
         url = self.url_input.text().strip()
-        if not url:
+        if not url or not (url.startswith("http://") or url.startswith("https://")):
+            return
+
+        if hasattr(self, "analyzer_thread") and self.analyzer_thread and self.analyzer_thread.isRunning():
             return
 
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setText("Probing...")
-        self.status_lbl.setText("Analyzing target URL and extracting stream metadata...")
+        if is_media_stream_url(url):
+            self.status_lbl.setText("Probing YouTube/media stream (extracting 4K/HD/Audio formats)...")
+        else:
+            self.status_lbl.setText("Analyzing target URL and extracting stream metadata...")
 
         tools = {
             "aria2_path": self.db.get_setting("aria2_path", ""),
-            "ffmpeg_path": self.db.get_setting("ffmpeg_path", "")
+            "ffmpeg_path": self.db.get_setting("ffmpeg_path", ""),
+            "deno_path": self.db.get_setting("deno_path", "")
         }
         self.analyzer_thread = UrlAnalyzerThread(url, tools)
         self.analyzer_thread.analysis_complete.connect(self._on_analysis_done)
@@ -770,10 +818,17 @@ class AddDownloadDialog(QDialog):
         if formats:
             self.format_combo.blockSignals(True)
             self.format_combo.clear()
-            for f in formats:
+            selected_idx = 0
+            for idx, f in enumerate(formats):
                 self.format_combo.addItem(f["label"], f["id"])
+                if self.preferred_format_id:
+                    pref_lower = self.preferred_format_id.lower()
+                    if f["id"] == self.preferred_format_id or pref_lower in f.get("label", "").lower() or pref_lower in f.get("id", "").lower():
+                        selected_idx = idx
+            self.format_combo.setCurrentIndex(selected_idx)
             self.format_combo.setEnabled(True)
             self.format_combo.blockSignals(False)
+            self._on_format_changed(selected_idx)
             self.status_lbl.setText(f"Media stream detected! Found {len(formats)} quality options (4K, HD, SD, Audio).")
         else:
             self.format_combo.blockSignals(True)
@@ -814,6 +869,31 @@ class AddDownloadDialog(QDialog):
         self.analyze_btn.setText("Analyze Link")
         self.status_lbl.setText(f"Analysis note: {err} (Direct download will proceed)")
 
+    def closeEvent(self, event):
+        self._cleanup_analyzer()
+        super().closeEvent(event)
+
+    def reject(self):
+        self._cleanup_analyzer()
+        super().reject()
+
+    def accept(self):
+        self._cleanup_analyzer()
+        super().accept()
+
+    def _cleanup_analyzer(self):
+        if hasattr(self, "url_debounce_timer") and self.url_debounce_timer:
+            self.url_debounce_timer.stop()
+        if hasattr(self, "analyzer_thread") and self.analyzer_thread:
+            try:
+                self.analyzer_thread.analysis_complete.disconnect()
+            except Exception:
+                pass
+            try:
+                self.analyzer_thread.analysis_failed.disconnect()
+            except Exception:
+                pass
+
     def _accept_download(self):
         url = self.url_input.text().strip()
         filename = self.filename_input.text().strip()
@@ -822,7 +902,14 @@ class AddDownloadDialog(QDialog):
         if not url:
             QMessageBox.warning(self, "Invalid Input", "Please provide a download URL.")
             return
-        if not filename:
+
+        if is_media_stream_url(url):
+            if not self.analyzed_result.get("engine"):
+                self.analyzed_result["engine"] = "ytdlp"
+            if filename in ("download.bin", "download"):
+                filename = ""
+
+        if not filename and not is_media_stream_url(url):
             filename = "download.bin"
         if not save_dir:
             save_dir = os.path.expanduser("~/Downloads")
@@ -830,13 +917,21 @@ class AddDownloadDialog(QDialog):
         self.accept()
 
     def get_task_data(self) -> Dict[str, Any]:
+        url = self.url_input.text().strip()
         fmt_id = self.format_combo.currentData() if self.format_combo.isEnabled() else ""
-        engine = self.analyzed_result.get("engine", "auto")
+        if not fmt_id and is_media_stream_url(url):
+            fmt_id = getattr(self, "preferred_format_id", "") or "bestvideo+bestaudio/best"
+        engine = self.analyzed_result.get("engine", "")
+        if not engine:
+            engine = "ytdlp" if is_media_stream_url(url) else "auto"
         scheduled_iso = self.schedule_dt.dateTime().toString(Qt.DateFormat.ISODate) if self.schedule_chk.isChecked() else ""
+        fn = self.filename_input.text().strip()
+        if not fn:
+            fn = "%(title)s.%(ext)s" if is_media_stream_url(url) else "download.bin"
         return {
-            "url": self.url_input.text().strip(),
-            "filename": self.filename_input.text().strip() or "download.bin",
-            "save_dir": self.save_input.text().strip(),
+            "url": url,
+            "filename": fn,
+            "save_dir": self.save_input.text().strip() or os.path.expanduser("~/Downloads"),
             "format_id": fmt_id,
             "engine": engine,
             "connections": self.conn_spin.value(),
@@ -935,13 +1030,6 @@ class SettingsDialog(QDialog):
         extract_layout.addWidget(self.extract_chk)
         layout.addLayout(extract_layout)
 
-        # Auto Shutdown Checkbox
-        shutdown_layout = QHBoxLayout()
-        self.shutdown_chk = QCheckBox("Auto-Shutdown PC when all downloads finish (with 30s cancellation window)")
-        self.shutdown_chk.setChecked(self.db.get_setting("auto_shutdown", "false") == "true")
-        shutdown_layout.addWidget(self.shutdown_chk)
-        layout.addLayout(shutdown_layout)
-
         # aria2 path
         aria_layout = QHBoxLayout()
         aria_lbl = QLabel("aria2c Executable:")
@@ -1023,7 +1111,6 @@ class SettingsDialog(QDialog):
         self.db.set_setting("smart_routing", "true" if self.smart_route_chk.isChecked() else "false")
         self.db.set_setting("auto_antivirus_scan", "true" if self.defender_chk.isChecked() else "false")
         self.db.set_setting("auto_extract_archives", "true" if self.extract_chk.isChecked() else "false")
-        self.db.set_setting("auto_shutdown", "true" if self.shutdown_chk.isChecked() else "false")
         self.db.set_setting("aria2_path", self.aria_input.text())
         self.db.set_setting("ffmpeg_path", self.ff_input.text())
         self.accept()
@@ -1408,90 +1495,6 @@ class SiteGrabberDialog(QDialog):
         self.accept()
 
 
-class AutoShutdownCountdownDialog(QDialog):
-    """Countdown dialog alerting user before computer shutdown with cancel option."""
-    def __init__(self, parent=None, countdown_seconds: int = 30):
-        super().__init__(parent)
-        self.setWindowTitle("Auto-Shutdown Imminent - Aegis DM")
-        self.setStyleSheet(DARK_STYLESHEET)
-        self.resize(460, 200)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.remaining = countdown_seconds
-        self.cancelled = False
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-        layout.setContentsMargins(24, 24, 24, 24)
-
-        title_lbl = QLabel("All Downloads Complete")
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #EF4444;")
-        layout.addWidget(title_lbl)
-
-        self.msg_lbl = QLabel(f"Your computer is scheduled to shut down in {self.remaining} seconds.")
-        self.msg_lbl.setStyleSheet("font-size: 13px; color: #F1F5F9;")
-        layout.addWidget(self.msg_lbl)
-
-        btn_layout = QHBoxLayout()
-        self.cancel_btn = QPushButton("Cancel Shutdown")
-        self.cancel_btn.setStyleSheet("background-color: #2563EB; font-weight: bold; padding: 8px 20px;")
-        self.cancel_btn.clicked.connect(self._cancel)
-
-        self.shutdown_now_btn = QPushButton("Shutdown Now")
-        self.shutdown_now_btn.setStyleSheet("background-color: #DC2626; padding: 8px 16px;")
-        self.shutdown_now_btn.clicked.connect(self._shutdown_now)
-
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.cancel_btn)
-        btn_layout.addWidget(self.shutdown_now_btn)
-        layout.addLayout(btn_layout)
-
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._tick)
-        self.timer.start(1000)
-
-        # Schedule Windows shutdown command as failsafe
-        if sys.platform == "win32":
-            try:
-                subprocess.run(
-                    ["shutdown", "/s", "/t", str(self.remaining), "/c", "Aegis Download Manager: All downloads completed. Shutting down system."],
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                )
-            except Exception:
-                pass
-
-    def _tick(self):
-        self.remaining -= 1
-        if self.remaining <= 0:
-            self.timer.stop()
-            self.accept()
-        else:
-            self.msg_lbl.setText(f"Your computer is scheduled to shut down in {self.remaining} seconds.")
-
-    def _cancel(self):
-        self.cancelled = True
-        self.timer.stop()
-        if sys.platform == "win32":
-            try:
-                subprocess.run(["shutdown", "/a"], creationflags=subprocess.CREATE_NO_WINDOW)
-            except Exception:
-                pass
-        self.reject()
-
-    def _shutdown_now(self):
-        self.timer.stop()
-        if sys.platform == "win32":
-            try:
-                subprocess.run(["shutdown", "/s", "/t", "0", "/f"], creationflags=subprocess.CREATE_NO_WINDOW)
-            except Exception:
-                pass
-        self.accept()
-
-    def closeEvent(self, event):
-        self._cancel()
-        event.accept()
-
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1520,8 +1523,16 @@ class MainWindow(QMainWindow):
         self._load_downloads()
         self._start_queue_timer()
         self._update_action_states()
+        QTimer.singleShot(600, self._process_pending_browser_queue)
+
+        # Periodic check for browser queue to ensure fast response to browser triggers
+        self.browser_queue_timer = QTimer(self)
+        self.browser_queue_timer.timeout.connect(self._process_pending_browser_queue)
+        self.browser_queue_timer.start(1500)
 
     def closeEvent(self, event):
+        if hasattr(self, "browser_queue_timer") and self.browser_queue_timer:
+            self.browser_queue_timer.stop()
         if hasattr(self, "queue_timer") and self.queue_timer:
             self.queue_timer.stop()
         if hasattr(self, "ipc_server") and self.ipc_server:
@@ -1595,13 +1606,6 @@ class MainWindow(QMainWindow):
         self.sniffer_act.setChecked(self.db.get_setting("clipboard_monitor", "false") == "true")
         self.sniffer_act.toggled.connect(self._toggle_sniffer)
         toolbar.addAction(self.sniffer_act)
-
-        # Auto-shutdown quick toggle
-        self.autoshutdown_act = QAction("Auto Shutdown", self, checkable=True)
-        self.autoshutdown_act.setToolTip("Automatically shut down computer when all active downloads complete")
-        self.autoshutdown_act.setChecked(self.db.get_setting("auto_shutdown", "false") == "true")
-        self.autoshutdown_act.toggled.connect(self._toggle_auto_shutdown)
-        toolbar.addAction(self.autoshutdown_act)
 
         self.settings_act = QAction("Settings", self)
         self.settings_act.setToolTip("Configure speeds, folders, and tools")
@@ -2093,43 +2097,67 @@ class MainWindow(QMainWindow):
                     if not data.get("scheduled_time"):
                         self._start_task(task_id, data["connections"])
 
+    def _force_bring_to_foreground(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform == "win32":
+            force_foreground_window(int(self.winId()))
+
     def _on_browser_ipc_message(self, msg: dict):
         url = msg.get("url", "").strip()
         if not url:
             return
 
-        self.activateWindow()
-        self.raise_()
+        self._force_bring_to_foreground()
 
-        # Prompt user confirmation before adding browser download
-        reply = QMessageBox.question(
-            self,
-            "Browser Download Request",
-            f"Incoming download request from browser extension:\n\n{url}\n\nAdd this file to Aegis Download Manager?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            dlg = AddDownloadDialog(self, self.db)
-            dlg.url_input.setText(url)
-            if msg.get("filename"):
-                dlg.filename_input.setText(msg["filename"])
-            dlg._analyze_url()
-            if dlg.exec() == QDialog.DialogCode.Accepted:
-                data = dlg.get_task_data()
-                save_path = os.path.join(data["save_dir"], data["filename"])
-                cat = self.db.categorize_filename(data["filename"])
-                task_id = self.db.add_download(
-                    url=data["url"],
-                    filename=data["filename"],
-                    save_path=save_path,
-                    category=cat,
-                    engine_type=data["engine"],
-                    format_id=data["format_id"],
-                    scheduled_time=data.get("scheduled_time", "")
-                )
-                self._load_downloads()
-                if not data.get("scheduled_time"):
-                    self._start_task(task_id, data["connections"])
+        dlg = AddDownloadDialog(None, self.db)
+        dlg.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        dlg.url_input.setText(url)
+        if msg.get("filename"):
+            dlg.filename_input.setText(msg["filename"])
+        if msg.get("format_id"):
+            dlg.preferred_format_id = msg.get("format_id")
+        elif msg.get("audio_only"):
+            dlg.preferred_format_id = "audio"
+
+        dlg._analyze_url()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        if sys.platform == "win32":
+            force_foreground_window(int(dlg.winId()))
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            data = dlg.get_task_data()
+            save_path = os.path.join(data["save_dir"], data["filename"])
+            cat = self.db.categorize_filename(data["filename"])
+            task_id = self.db.add_download(
+                url=data["url"],
+                filename=data["filename"],
+                save_path=save_path,
+                category=cat,
+                engine_type=data["engine"],
+                format_id=data["format_id"],
+                scheduled_time=data.get("scheduled_time", "")
+            )
+            self._load_downloads()
+            if not data.get("scheduled_time"):
+                self._start_task(task_id, data["connections"])
+
+    def _process_pending_browser_queue(self):
+        import json
+        app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
+        queue_file = os.path.join(app_data, "browser_queue.json")
+        if os.path.exists(queue_file):
+            try:
+                with open(queue_file, "r", encoding="utf-8") as f:
+                    queue = json.load(f)
+                os.remove(queue_file)
+                for item in queue:
+                    self._on_browser_ipc_message(item)
+            except Exception:
+                pass
 
     def _open_settings(self):
         dlg = SettingsDialog(self, self.db)
@@ -2470,8 +2498,9 @@ class MainWindow(QMainWindow):
         engine = task.get("engine_type", "auto")
         max_speed = int(self.db.get_setting("max_download_speed", "0"))
 
-        # Choose worker: prefer aria2 for multi-threaded segments on both 'aria2' and 'auto'
-        if engine == "ytdlp":
+        # Choose worker: prefer ytdlp for any video stream URL or ytdlp engine
+        is_stream = is_media_stream_url(task["url"])
+        if engine == "ytdlp" or is_stream:
             worker = YtDlpWorker(task_id, task["url"], task["filename"], save_dir, connections, task.get("format_id", ""), tools_conf, max_speed_kbs=max_speed)
         elif (engine in ("aria2", "auto")) and find_tool_binary("aria2c", tools_conf["aria2_path"]):
             worker = Aria2Worker(task_id, task["url"], task["filename"], save_dir, connections, task.get("format_id", ""), tools_conf, max_speed_kbs=max_speed)
@@ -2573,23 +2602,6 @@ class MainWindow(QMainWindow):
             queued = any(t.get("status") == "queued" for t in all_dl)
             if not queued:
                 allow_sleep()
-                if self.db.get_setting("auto_shutdown", "false") == "true":
-                    QTimer.singleShot(600, self._trigger_auto_shutdown)
-
-    def _toggle_auto_shutdown(self, checked: bool):
-        self.db.set_setting("auto_shutdown", "true" if checked else "false")
-        state_str = "Enabled" if checked else "Disabled"
-        self.status_bar.showMessage(f"Auto-Shutdown on Completion: {state_str}", 4000)
-
-    def _trigger_auto_shutdown(self):
-        if len(self.active_workers) > 0:
-            return
-        dlg = AutoShutdownCountdownDialog(self, countdown_seconds=30)
-        dlg.exec()
-        if dlg.cancelled:
-            self.autoshutdown_act.setChecked(False)
-            self.db.set_setting("auto_shutdown", "false")
-            self.status_bar.showMessage("Auto-shutdown was cancelled by user.", 6000)
 
     def _process_queue(self):
         max_conc = int(self.db.get_setting("max_concurrent", "3"))

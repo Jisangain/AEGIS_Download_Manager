@@ -1,13 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Aegis Download Manager",
-  "version": "1.0.0",
-  "description": "Fast, license-free download capture for Aegis Download Manager.",
+  "version": "1.2.0",
+  "description": "Smart stream sniffer & floating video download panel for Aegis Download Manager.",
   "permissions": [
     "nativeMessaging",
     "contextMenus",
     "downloads",
-    "storage"
+    "storage",
+    "webRequest",
+    "tabs",
+    "activeTab"
   ],
   "host_permissions": [
     "*://*/*"
@@ -15,6 +18,16 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*", "<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "match_about_blank": true,
+      "all_frames": false
+    }
+  ],
   "action": {
     "default_title": "Aegis Download Manager"
   }

@@ -1,10 +1,10 @@
 {
   "name": "com.aegis.downloadmanager",
   "description": "Aegis Download Manager Native Messaging Host",
-  "path": "E:\\reverse\\AegisDownloadManager\\browser_extension\\aegis_host.bat",
+  "path": "E:\\reverse\\AegisDownloadManager\\browser_extension\\aegis_host.exe",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://*/",
-    "edge-extension://*/"
+    "chrome-extension://olhghfhliadcobalbkamekmbdgcgmhee/",
+    "chrome-extension://icdicciedmiojchchcagghmpkbenkccj/"
   ]
 }

@@ -86,7 +86,6 @@ class Database:
                 "theme": "Dark",
                 "max_download_speed": "0",
                 "clipboard_monitor": "false",
-                "auto_shutdown": "false",
                 "smart_routing": "true",
                 "auto_antivirus_scan": "false",
                 "auto_extract_archives": "false"
