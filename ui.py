@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QStyle
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime, QThread
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication
+from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication, QShortcut
 
 class NoFocusDelegate(QStyledItemDelegate):
     """Eliminates the dotted/dashed focus rectangle drawn on active table cells."""
@@ -28,6 +28,50 @@ class NoFocusDelegate(QStyledItemDelegate):
         if option.state & QStyle.StateFlag.State_HasFocus:
             option.state = option.state ^ QStyle.StateFlag.State_HasFocus
         super().paint(painter, option, index)
+
+class NumericTableWidgetItem(QTableWidgetItem):
+    """Custom QTableWidgetItem supporting accurate numerical, size, and date sorting."""
+    def __init__(self, text: str, sort_val: Any = None):
+        super().__init__(text)
+        self.sort_val = sort_val if sort_val is not None else text
+
+    def __lt__(self, other):
+        if isinstance(other, NumericTableWidgetItem):
+            try:
+                return self.sort_val < other.sort_val
+            except TypeError:
+                return str(self.sort_val) < str(other.sort_val)
+        return super().__lt__(other)
+
+def parse_speed_to_bytes(spd_str: str) -> float:
+    if not spd_str or spd_str in ("--", "0 KB/s", "0 B/s"):
+        return 0.0
+    s = spd_str.replace("/s", "").strip().lower()
+    try:
+        parts = s.split()
+        if len(parts) == 2:
+            val, unit = float(parts[0]), parts[1]
+            if "gb" in unit: return val * (1024**3)
+            if "mb" in unit: return val * (1024**2)
+            if "kb" in unit: return val * 1024
+            return val
+    except Exception:
+        pass
+    return 0.0
+
+def parse_eta_to_seconds(eta_str: str) -> int:
+    if not eta_str or eta_str in ("--", "00:00"):
+        return 999999999
+    s = eta_str.replace("s", "").strip()
+    try:
+        parts = s.split(":")
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(s)
+    except Exception:
+        return 999999999
 
 from database import Database
 from engine import (
@@ -284,6 +328,10 @@ QTableWidget::item:selected {
     background-color: rgba(0, 122, 255, 0.35);
     color: #FFFFFF;
     outline: none;
+    border: none;
+}
+QHeaderView {
+    background-color: #18181B;
     border: none;
 }
 QHeaderView::section {
@@ -1801,6 +1849,7 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setItemDelegate(NoFocusDelegate(self.table))
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1809,21 +1858,35 @@ class MainWindow(QMainWindow):
         self.table.cellClicked.connect(self._on_table_cell_clicked)
         self.table.itemSelectionChanged.connect(self._update_action_states)
 
-        # Header section modes & default widths - Interactive mouse drag resizing and moving
+        # Keyboard shortcuts: Ctrl+A (Select All), Delete (Delete selected tasks), Shift+Del (Delete with file)
+        QShortcut(QKeySequence.StandardKey.SelectAll, self.table, self.table.selectAll)
+        QShortcut(QKeySequence.StandardKey.Delete, self.table, self._delete_selected)
+        QShortcut(QKeySequence(Qt.KeyboardModifier.ShiftModifier | Qt.Key.Key_Delete), self.table, self._delete_selected_with_file)
+
+        # Header section modes & default widths - Interactive mouse drag resizing, sorting, and full stretch
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionsMovable(True)
         header.setCascadingSectionResizes(True)
         header.setHighlightSections(False)
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
 
-        self.table.setColumnWidth(0, 46)
-        self.table.setColumnWidth(1, 260)
-        self.table.setColumnWidth(2, 145)
-        self.table.setColumnWidth(3, 190)
-        self.table.setColumnWidth(4, 95)
-        self.table.setColumnWidth(5, 75)
-        self.table.setColumnWidth(6, 110)
-        self.table.setColumnWidth(7, 130)
+        self.table.setColumnWidth(0, 48)   # ID
+        self.table.setColumnWidth(2, 130)  # Size
+        self.table.setColumnWidth(3, 170)  # Progress
+        self.table.setColumnWidth(4, 95)   # Speed
+        self.table.setColumnWidth(5, 75)   # ETA
+        self.table.setColumnWidth(6, 110)  # Status
+        self.table.setColumnWidth(7, 140)  # Date Added
+
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # File Name stretches to 100% of available width!
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
         self.stack.addWidget(self.table)
 
         # Empty State Overlay Widget
@@ -2270,6 +2333,8 @@ class MainWindow(QMainWindow):
         else:
             self.stack.setCurrentWidget(self.table)
 
+        # Temporarily disable sorting while repopulating items to prevent flicker
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(filtered))
         for row, t in enumerate(filtered):
             task_id = str(t["id"])
@@ -2279,14 +2344,14 @@ class MainWindow(QMainWindow):
             downloaded = t.get("downloaded_size", 0)
 
             # Col 0: ID
-            id_item = QTableWidgetItem(task_id)
+            id_item = NumericTableWidgetItem(task_id, sort_val=int(t["id"]))
             id_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             id_item.setForeground(QColor("#64748B"))
             self.table.setItem(row, 0, id_item)
 
             # Col 1: Filename
-            fn_item = QTableWidgetItem(filename)
+            fn_item = NumericTableWidgetItem(filename, sort_val=filename.lower())
             fn_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             fn_font = QFont("Segoe UI", 9)
             fn_font.setBold(True)
@@ -2296,7 +2361,8 @@ class MainWindow(QMainWindow):
 
             # Col 2: Size (Shows downloaded / total numbers)
             size_str = format_size_pair(downloaded, total_size, status)
-            size_item = QTableWidgetItem(size_str)
+            size_val = total_size if total_size > 0 else downloaded
+            size_item = NumericTableWidgetItem(size_str, sort_val=int(size_val))
             size_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             size_item.setForeground(QColor("#CBD5E1"))
@@ -2306,7 +2372,7 @@ class MainWindow(QMainWindow):
             # Col 3: Progress Bar (Shows percentage + visual download numbers; blank when completed)
             if status == "completed":
                 self.table.setCellWidget(row, 3, None)
-                blank_item = QTableWidgetItem("")
+                blank_item = NumericTableWidgetItem("", sort_val=100.0)
                 blank_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, 3, blank_item)
             else:
@@ -2316,11 +2382,14 @@ class MainWindow(QMainWindow):
                 pbar.setFormat(format_progress_text(pct, downloaded, total_size, status))
                 style_progress_bar(pbar, status)
                 pbar.setToolTip(f"Progress: {pct:.1f}%\nDownloaded: {format_file_size(downloaded)} / {format_file_size(total_size)}")
+                prog_item = NumericTableWidgetItem("", sort_val=float(pct))
+                prog_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.table.setItem(row, 3, prog_item)
                 self.table.setCellWidget(row, 3, pbar)
 
             # Col 4: Speed
             spd_str = t.get("speed", "") or "--"
-            spd_item = QTableWidgetItem(spd_str)
+            spd_item = NumericTableWidgetItem(spd_str, sort_val=parse_speed_to_bytes(spd_str))
             spd_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             spd_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if spd_str not in ("--", "", "0 KB/s") and status == "downloading":
@@ -2331,7 +2400,7 @@ class MainWindow(QMainWindow):
 
             # Col 5: ETA
             eta_str = t.get("eta", "") or "--"
-            eta_item = QTableWidgetItem(eta_str)
+            eta_item = NumericTableWidgetItem(eta_str, sort_val=parse_eta_to_seconds(eta_str))
             eta_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             eta_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             eta_item.setForeground(QColor("#94A3B8"))
@@ -2339,7 +2408,7 @@ class MainWindow(QMainWindow):
 
             # Col 6: Status Badge
             disp_status, status_col = format_status(status)
-            st_item = QTableWidgetItem(disp_status)
+            st_item = NumericTableWidgetItem(disp_status, sort_val=status.lower())
             st_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             st_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             st_item.setForeground(QColor(status_col))
@@ -2351,12 +2420,14 @@ class MainWindow(QMainWindow):
             # Col 7: Download Date
             raw_date = t.get("completed_at") if (status == "completed" and t.get("completed_at")) else t.get("created_at", "")
             date_str = format_download_date(raw_date)
-            date_item = QTableWidgetItem(date_str)
+            date_item = NumericTableWidgetItem(date_str, sort_val=str(raw_date or ""))
             date_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             date_item.setForeground(QColor("#94A3B8"))
             date_item.setToolTip(f"Added: {t.get('created_at', '--')}\nCompleted: {t.get('completed_at', '--')}")
             self.table.setItem(row, 7, date_item)
+
+        self.table.setSortingEnabled(True)
 
         # Update macOS Count Badge
         if hasattr(self, "count_badge_lbl"):
@@ -2658,20 +2729,39 @@ class MainWindow(QMainWindow):
                 return None
         return None
 
+    def _get_selected_task_ids(self) -> List[int]:
+        selected_rows = set(index.row() for index in self.table.selectedIndexes())
+        ids = []
+        for r in selected_rows:
+            item = self.table.item(r, 0)
+            if item:
+                try:
+                    ids.append(int(item.text()))
+                except ValueError:
+                    pass
+        if not ids:
+            curr = self._get_selected_task_id()
+            if curr:
+                ids.append(curr)
+        return ids
+
     def _resume_selected(self):
-        t_id = self._get_selected_task_id()
-        if t_id and t_id not in self.active_workers:
-            self._start_task(t_id)
+        ids = self._get_selected_task_ids()
+        for t_id in ids:
+            if t_id not in self.active_workers:
+                self._start_task(t_id)
 
     def _pause_selected(self):
-        t_id = self._get_selected_task_id()
-        if t_id and t_id in self.active_workers:
-            self.active_workers[t_id].pause()
+        ids = self._get_selected_task_ids()
+        for t_id in ids:
+            if t_id in self.active_workers:
+                self.active_workers[t_id].pause()
 
     def _cancel_selected(self):
-        t_id = self._get_selected_task_id()
-        if t_id and t_id in self.active_workers:
-            self.active_workers[t_id].cancel()
+        ids = self._get_selected_task_ids()
+        for t_id in ids:
+            if t_id in self.active_workers:
+                self.active_workers[t_id].cancel()
 
     def _restart_selected(self):
         t_id = self._get_selected_task_id()
@@ -2829,33 +2919,43 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Download link copied to clipboard.", 3000)
 
     def _delete_selected(self):
-        t_id = self._get_selected_task_id()
-        if not t_id:
+        ids = self._get_selected_task_ids()
+        if not ids:
             return
+        if len(ids) == 1:
+            msg = "Delete this download task from history?\n(The file on disk will be preserved)"
+        else:
+            msg = f"Delete these {len(ids)} selected download tasks from history?\n(The files on disk will be preserved)"
+
         ans = QMessageBox.question(
-            self, "Confirm Delete", 
-            "Delete this download task from history?\n(The file on disk will be preserved)",
+            self, "Confirm Delete", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if ans == QMessageBox.StandardButton.Yes:
-            if t_id in self.active_workers:
-                self.active_workers[t_id].cancel()
-            self.db.delete_download(t_id, delete_file=False)
+            for t_id in ids:
+                if t_id in self.active_workers:
+                    self.active_workers[t_id].cancel()
+                self.db.delete_download(t_id, delete_file=False)
             self._load_downloads()
 
     def _delete_selected_with_file(self):
-        t_id = self._get_selected_task_id()
-        if not t_id:
+        ids = self._get_selected_task_ids()
+        if not ids:
             return
+        if len(ids) == 1:
+            msg = "Are you sure you want to delete this task AND permanently delete the file from your computer?"
+        else:
+            msg = f"Are you sure you want to delete these {len(ids)} tasks AND permanently delete their files from your computer?"
+
         ans = QMessageBox.question(
-            self, "Confirm Permanent Delete", 
-            "Are you sure you want to delete this task AND permanently delete the file from your computer?",
+            self, "Confirm Permanent Delete", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if ans == QMessageBox.StandardButton.Yes:
-            if t_id in self.active_workers:
-                self.active_workers[t_id].cancel()
-            self.db.delete_download(t_id, delete_file=True)
+            for t_id in ids:
+                if t_id in self.active_workers:
+                    self.active_workers[t_id].cancel()
+                self.db.delete_download(t_id, delete_file=True)
             self._load_downloads()
 
     def _on_double_click(self, row: int, col: int):
