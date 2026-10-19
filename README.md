@@ -18,6 +18,7 @@ Designed as a zero-telemetry, zero-backend, fully independent alternative withou
 - **Native Browser Integration:** Independent Chrome and Edge extension powered by Native Messaging and Windows Named Pipe IPC (`\\.\pipe\Aegis_Download_Manager_Pipe`).
 - **Pure Local Persistence:** SQLite database tracks download history and settings locally in `%APPDATA%\AegisDownloadManager\aegis_downloads.db`.
 - **Zero Licensing Overhead:** Completely offline-first with no remote licensing calls, expiration dates, or HWID checks.
+- **Headless CLI Mode:** Run `python main.py --download <url> --dest <folder>` (or the packaged `.exe`) to queue downloads without launching the GUI.
 
 ---
 
