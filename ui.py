@@ -16,10 +16,18 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QLineEdit, QFileDialog, QDialog, QComboBox,
     QSpinBox, QProgressBar, QMessageBox, QMenu, QToolBar, QStatusBar,
-    QCheckBox, QDateTimeEdit, QTextEdit, QStackedWidget, QFrame
+    QCheckBox, QDateTimeEdit, QTextEdit, QStackedWidget, QFrame,
+    QAbstractItemView, QStyledItemDelegate, QStyle
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime, QThread
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication
+
+class NoFocusDelegate(QStyledItemDelegate):
+    """Eliminates the dotted/dashed focus rectangle drawn on active table cells."""
+    def paint(self, painter, option, index):
+        if option.state & QStyle.StateFlag.State_HasFocus:
+            option.state = option.state ^ QStyle.StateFlag.State_HasFocus
+        super().paint(painter, option, index)
 
 from database import Database
 from engine import (
@@ -261,14 +269,22 @@ QTableWidget {
     selection-background-color: rgba(0, 122, 255, 0.3);
     selection-color: #FFFFFF;
     font-size: 12px;
+    outline: none;
 }
 QTableWidget::item {
     padding: 6px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    outline: none;
+}
+QTableWidget::item:focus {
+    outline: none;
+    border: none;
 }
 QTableWidget::item:selected {
     background-color: rgba(0, 122, 255, 0.35);
     color: #FFFFFF;
+    outline: none;
+    border: none;
 }
 QHeaderView::section {
     background-color: #18181B;
@@ -1785,6 +1801,8 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setItemDelegate(NoFocusDelegate(self.table))
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.cellDoubleClicked.connect(self._on_double_click)
@@ -2262,12 +2280,14 @@ class MainWindow(QMainWindow):
 
             # Col 0: ID
             id_item = QTableWidgetItem(task_id)
+            id_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             id_item.setForeground(QColor("#64748B"))
             self.table.setItem(row, 0, id_item)
 
             # Col 1: Filename
             fn_item = QTableWidgetItem(filename)
+            fn_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             fn_font = QFont("Segoe UI", 9)
             fn_font.setBold(True)
             fn_item.setFont(fn_font)
@@ -2277,6 +2297,7 @@ class MainWindow(QMainWindow):
             # Col 2: Size (Shows downloaded / total numbers)
             size_str = format_size_pair(downloaded, total_size, status)
             size_item = QTableWidgetItem(size_str)
+            size_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             size_item.setForeground(QColor("#CBD5E1"))
             size_item.setToolTip(f"Downloaded: {format_file_size(downloaded)}\nTotal Size: {format_file_size(total_size)}")
@@ -2286,7 +2307,7 @@ class MainWindow(QMainWindow):
             if status == "completed":
                 self.table.setCellWidget(row, 3, None)
                 blank_item = QTableWidgetItem("")
-                blank_item.setFlags(blank_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                blank_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, 3, blank_item)
             else:
                 pct = (downloaded / total_size * 100) if total_size > 0 else 0
@@ -2300,6 +2321,7 @@ class MainWindow(QMainWindow):
             # Col 4: Speed
             spd_str = t.get("speed", "") or "--"
             spd_item = QTableWidgetItem(spd_str)
+            spd_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             spd_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if spd_str not in ("--", "", "0 KB/s") and status == "downloading":
                 spd_item.setForeground(QColor("#38BDF8"))
@@ -2310,6 +2332,7 @@ class MainWindow(QMainWindow):
             # Col 5: ETA
             eta_str = t.get("eta", "") or "--"
             eta_item = QTableWidgetItem(eta_str)
+            eta_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             eta_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             eta_item.setForeground(QColor("#94A3B8"))
             self.table.setItem(row, 5, eta_item)
@@ -2317,6 +2340,7 @@ class MainWindow(QMainWindow):
             # Col 6: Status Badge
             disp_status, status_col = format_status(status)
             st_item = QTableWidgetItem(disp_status)
+            st_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             st_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             st_item.setForeground(QColor(status_col))
             st_font = QFont("Segoe UI", 9)
@@ -2328,6 +2352,7 @@ class MainWindow(QMainWindow):
             raw_date = t.get("completed_at") if (status == "completed" and t.get("completed_at")) else t.get("created_at", "")
             date_str = format_download_date(raw_date)
             date_item = QTableWidgetItem(date_str)
+            date_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             date_item.setForeground(QColor("#94A3B8"))
             date_item.setToolTip(f"Added: {t.get('created_at', '--')}\nCompleted: {t.get('completed_at', '--')}")
