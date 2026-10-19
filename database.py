@@ -283,20 +283,19 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def update_file_path(self, task_id: int, save_path: str, filename: Optional[str] = None):
+        with self._lock, self._connection() as conn:
+            cursor = conn.cursor()
+            if filename:
+                cursor.execute("UPDATE downloads SET save_path = ?, filename = ? WHERE id = ?", (save_path, filename, task_id))
+            else:
+                cursor.execute("UPDATE downloads SET save_path = ? WHERE id = ?", (save_path, task_id))
+            conn.commit()
+
     def get_all_downloads(self) -> List[Dict[str, Any]]:
         with self._lock, self._connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM downloads 
-                ORDER BY 
-                    CASE 
-                        WHEN status = 'downloading' THEN 0 
-                        WHEN status = 'queued' THEN 1 
-                        ELSE 2 
-                    END,
-                    queue_pos ASC, 
-                    id DESC
-            """)
+            cursor.execute("SELECT * FROM downloads ORDER BY id DESC")
             return [dict(row) for row in cursor.fetchall()]
 
     def delete_download(self, task_id: int, delete_file: bool = False):

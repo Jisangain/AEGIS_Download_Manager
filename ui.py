@@ -9,7 +9,7 @@ import subprocess
 import urllib.parse
 import threading
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -2438,8 +2438,9 @@ class MainWindow(QMainWindow):
         conns = getattr(worker, "connections", 16) if worker else "--"
         self.insp_sockets_val.setText(str(conns))
 
+        file_path, folder_path = self._resolve_task_paths(task)
         self.insp_url_edit.setText(task.get("url", ""))
-        self.insp_path_edit.setText(task.get("save_path", ""))
+        self.insp_path_edit.setText(file_path if file_path else task.get("save_path", ""))
 
         if not self.inspector_panel.isVisible():
             self.inspector_panel.setVisible(True)
@@ -2568,13 +2569,16 @@ class MainWindow(QMainWindow):
         self._check_all_finished()
 
     def _on_worker_finished(self, task_id: int, file_path: str):
+        if file_path:
+            norm_fp = os.path.normpath(os.path.abspath(file_path))
+            self.db.update_file_path(task_id, norm_fp, os.path.basename(norm_fp))
         self.db.update_status(task_id, "completed")
         self._worker_speeds.pop(task_id, None)
         if task_id in self.active_workers:
             del self.active_workers[task_id]
         self._update_live_metrics()
         self._load_downloads()
-        fn = os.path.basename(file_path)
+        fn = os.path.basename(file_path) if file_path else "file"
         self.status_bar.showMessage(f"Download Finished: {fn}", 5000)
         self._check_all_finished()
 
@@ -2668,28 +2672,127 @@ class MainWindow(QMainWindow):
             self.db.set_schedule(t_id, iso_val)
             self._load_downloads()
 
+    def _resolve_task_paths(self, task: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Locates the actual file on disk and its containing directory.
+        Handles:
+        1. Exact save_path match.
+        2. Format/extension variations (e.g. yt-dlp merging to .mkv, .mp4, .webm).
+        3. Smart routing subfolder relocations.
+        4. Self-heals the database record with the exact on-disk path.
+        Returns: (file_path, folder_path) where file_path is None if not yet on disk.
+        """
+        if not task:
+            return (None, None)
+
+        raw_path = task.get("save_path", "")
+        task_id = task.get("id")
+        fn = task.get("filename", "")
+
+        # 1. Direct path check
+        if raw_path:
+            norm = os.path.normpath(os.path.abspath(raw_path))
+            if os.path.isfile(norm):
+                return (norm, os.path.dirname(norm))
+            if os.path.isdir(norm):
+                return (None, norm)
+
+        # 2. Determine base search directories
+        default_dl = os.path.normpath(os.path.abspath(self.db.get_setting("download_dir", os.path.join(os.path.expanduser("~"), "Downloads"))))
+        candidate_dirs = []
+        if raw_path:
+            parent = os.path.dirname(os.path.normpath(os.path.abspath(raw_path)))
+            if os.path.isdir(parent) and parent not in candidate_dirs:
+                candidate_dirs.append(parent)
+
+        if os.path.isdir(default_dl) and default_dl not in candidate_dirs:
+            candidate_dirs.append(default_dl)
+
+        # Smart routing category subdirectories
+        cat = task.get("category", "")
+        if os.path.isdir(default_dl):
+            if cat and cat != "Other":
+                cat_dir = os.path.join(default_dl, cat)
+                if os.path.isdir(cat_dir) and cat_dir not in candidate_dirs:
+                    candidate_dirs.insert(0, cat_dir)
+            for std_cat in ("Video", "Music", "Documents", "Programs", "Compressed", "Archives", "Images"):
+                sdir = os.path.join(default_dl, std_cat)
+                if os.path.isdir(sdir) and sdir not in candidate_dirs:
+                    candidate_dirs.append(sdir)
+
+        # 3. Search candidate directories for exact or base-matching files
+        base_name = os.path.splitext(fn)[0] if fn else ""
+        for d in candidate_dirs:
+            if not os.path.isdir(d):
+                continue
+
+            # Exact filename check
+            if fn:
+                exact_path = os.path.join(d, fn)
+                if os.path.isfile(exact_path):
+                    if task_id:
+                        self.db.update_file_path(task_id, exact_path, fn)
+                    return (exact_path, d)
+
+            # Prefix/base-name check (e.g. yt-dlp .mkv, .mp4, audio .mp3)
+            if base_name:
+                try:
+                    for entry in os.listdir(d):
+                        cand_file = os.path.join(d, entry)
+                        if not os.path.isfile(cand_file):
+                            continue
+                        if entry.endswith(".part") or entry.endswith(".aria2"):
+                            continue
+                        c_base, _ = os.path.splitext(entry)
+                        if c_base == base_name or entry.startswith(base_name):
+                            if task_id:
+                                self.db.update_file_path(task_id, cand_file, entry)
+                            return (cand_file, d)
+                except Exception:
+                    pass
+
+        # 4. Fallback folder
+        fallback_folder = candidate_dirs[0] if candidate_dirs else default_dl
+        return (None, fallback_folder if os.path.isdir(fallback_folder) else None)
+
     def _open_selected_file(self):
         t_id = self._get_selected_task_id()
         if not t_id:
             return
         task = self.db.get_download(t_id)
-        if task:
-            path = task.get("save_path", "")
-            if path and os.path.exists(path):
-                os.startfile(path)
+        if not task:
+            return
+        file_path, folder_path = self._resolve_task_paths(task)
+        if file_path and os.path.isfile(file_path):
+            try:
+                os.startfile(os.path.normpath(os.path.abspath(file_path)))
+            except Exception as e:
+                QMessageBox.warning(self, "Open File Failed", f"Could not open file:\n{e}")
+        else:
+            st = task.get("status", "")
+            if st in ("downloading", "queued", "paused", "scheduled"):
+                QMessageBox.information(self, "Download Incomplete", f"This task is currently '{st}'. The file is not fully downloaded yet.")
             else:
-                QMessageBox.information(self, "File Not Found", "The downloaded file does not exist on disk yet.")
+                QMessageBox.warning(self, "File Not Found", "The downloaded file could not be found on disk.")
 
     def _open_selected_folder(self):
         t_id = self._get_selected_task_id()
         if not t_id:
             return
         task = self.db.get_download(t_id)
-        if task:
-            path = task["save_path"]
-            folder = os.path.dirname(path) if os.path.exists(path) else self.db.get_setting("download_dir")
-            if os.path.exists(folder):
-                os.startfile(folder)
+        if not task:
+            return
+        file_path, folder_path = self._resolve_task_paths(task)
+        if file_path and os.path.isfile(file_path):
+            norm_file = os.path.normpath(os.path.abspath(file_path))
+            try:
+                subprocess.Popen(f'explorer.exe /select,"{norm_file}"')
+            except Exception:
+                os.startfile(os.path.dirname(norm_file))
+        elif folder_path and os.path.isdir(folder_path):
+            os.startfile(os.path.normpath(os.path.abspath(folder_path)))
+        else:
+            QMessageBox.warning(self, "Folder Not Found", "Could not locate the download directory on disk.")
 
     def _copy_selected_url(self):
         t_id = self._get_selected_task_id()
@@ -2731,12 +2834,30 @@ class MainWindow(QMainWindow):
             self._load_downloads()
 
     def _on_double_click(self, row: int, col: int):
-        t_id = int(self.table.item(row, 0).text())
+        id_item = self.table.item(row, 0)
+        if not id_item:
+            return
+        try:
+            t_id = int(id_item.text())
+        except ValueError:
+            return
         task = self.db.get_download(t_id)
-        if task and os.path.exists(task["save_path"]):
-            os.startfile(task["save_path"])
+        if not task:
+            return
+
+        file_path, folder_path = self._resolve_task_paths(task)
+        if file_path and os.path.isfile(file_path):
+            try:
+                os.startfile(os.path.normpath(os.path.abspath(file_path)))
+            except Exception as e:
+                QMessageBox.warning(self, "Open File Failed", f"Could not open file:\n{e}")
         else:
-            self._open_selected_folder()
+            st = task.get("status", "")
+            if st in ("downloading", "queued", "paused"):
+                if folder_path and os.path.isdir(folder_path):
+                    os.startfile(os.path.normpath(os.path.abspath(folder_path)))
+            else:
+                QMessageBox.information(self, "File Not Found", "The downloaded file does not exist on disk yet.")
 
     def _show_context_menu(self, pos):
         row = self.table.rowAt(pos.y())
@@ -2752,8 +2873,8 @@ class MainWindow(QMainWindow):
 
         st = task.get("status", "")
         is_active = (st == "downloading" or t_id in self.active_workers)
-        file_path = task.get("save_path", "")
-        file_exists = bool(file_path and os.path.exists(file_path))
+        file_path, folder_path = self._resolve_task_paths(task)
+        file_exists = bool(file_path and os.path.isfile(file_path))
 
         menu = QMenu(self)
 
