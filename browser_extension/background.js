@@ -44,6 +44,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (chrome.runtime.lastError) {
           console.warn("Aegis Native Host communication failed:", chrome.runtime.lastError.message);
           sendResponse({ status: "error", error: chrome.runtime.lastError.message });
+        } else if (response && response.status === "error") {
+          console.warn("Aegis task failed:", response.error);
+          sendResponse({ status: "error", error: response.error || response.message || "Aegis failed to accept task" });
         } else {
           console.log("Aegis response:", response);
           sendResponse({ status: "ok", response: response });

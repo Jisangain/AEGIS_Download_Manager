@@ -2105,6 +2105,11 @@ class MainWindow(QMainWindow):
             force_foreground_window(int(self.winId()))
 
     def _on_browser_ipc_message(self, msg: dict):
+        action = msg.get("action", "download")
+        if action in ("bring_to_front", "ping"):
+            self._force_bring_to_foreground()
+            return
+
         url = msg.get("url", "").strip()
         if not url:
             return

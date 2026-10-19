@@ -1,151 +1,278 @@
 """
 Aegis Download Manager - Native Messaging Host
-Bridges Chrome and Edge browser extensions to Aegis via local Named Pipe IPC.
-Zero dependencies, pure standard library.
+Bridges Chrome, Brave, and Edge browser extensions to the Aegis desktop application.
+Ensures reliable delivery, cold-start launching, race-condition mitigation, and acceptance confirmation.
+Pure standard library, zero third-party dependencies.
 """
 
 import sys
 import os
 import struct
 import json
+import time
 import subprocess
 from datetime import datetime
-from ipc_server import send_ipc_message
+from typing import Optional, Dict, Any
+
+from ipc_server import send_ipc_message, PIPE_NAME
 
 if sys.platform == "win32":
     import msvcrt
+    import ctypes
+    from ctypes import wintypes
     try:
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
     except Exception:
         pass
+    kernel32 = ctypes.windll.kernel32
+else:
+    kernel32 = None
 
 def log_debug(msg: str):
+    """Appends diagnostic information strictly to the log file, never stdout."""
     try:
         app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
         os.makedirs(app_data, exist_ok=True)
         with open(os.path.join(app_data, "aegis_host.log"), "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().isoformat()} - {msg}\n")
+            f.write(f"{datetime.now().isoformat()} - [HOST] {msg}\n")
     except Exception:
         pass
 
-def read_native_message():
-    """Reads a message from the browser using Chrome Native Messaging protocol."""
+def read_native_message() -> Optional[Dict[str, Any]]:
+    """Reads a length-prefixed JSON message from the browser over stdin."""
     try:
         raw_length = sys.stdin.buffer.read(4)
         if len(raw_length) < 4:
-            log_debug("Native message raw_length < 4")
+            log_debug("Native message raw_length < 4 bytes (channel closed by browser)")
             return None
         message_length = struct.unpack("@I", raw_length)[0]
+        if message_length <= 0 or message_length > 10 * 1024 * 1024:
+            log_debug(f"Invalid message length: {message_length}")
+            return None
         raw_data = sys.stdin.buffer.read(message_length)
         if len(raw_data) < message_length:
-            log_debug(f"Truncated message: read {len(raw_data)} of {message_length}")
+            log_debug(f"Truncated message: read {len(raw_data)} of {message_length} bytes")
             return None
         parsed = json.loads(raw_data.decode("utf-8"))
-        log_debug(f"Received native message: {parsed}")
+        log_debug(f"Received valid native message: action={parsed.get('action')}, url={parsed.get('url')}")
         return parsed
     except Exception as e:
         log_debug(f"Exception reading native message: {e}")
         return None
 
-def send_native_response(payload):
-    """Sends a message back to the browser using Chrome Native Messaging protocol."""
+def send_native_response(payload: Dict[str, Any]):
+    """Sends a length-prefixed JSON response back to the browser over stdout."""
     try:
         encoded = json.dumps(payload).encode("utf-8")
         sys.stdout.buffer.write(struct.pack("@I", len(encoded)))
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
+        log_debug(f"Dispatched native response to browser: {payload.get('status')}")
     except Exception as e:
-        log_debug(f"Failed to send native response (pipe closed): {e}")
+        log_debug(f"Failed to write native response (browser pipe closed): {e}")
 
-def ensure_aegis_running(url: str = "", filename: str = "", format_id: str = ""):
-    """Checks if Aegis is running; launches it with task parameters if not."""
-    if getattr(sys, "frozen", False):
-        cur_dir = os.path.dirname(os.path.abspath(sys.executable))
-    else:
-        cur_dir = os.path.dirname(os.path.abspath(__file__))
+def validate_request(msg: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Validates the structure of the incoming browser message."""
+    if not msg or not isinstance(msg, dict):
+        return "Empty or malformed JSON payload"
+    action = msg.get("action")
+    if not action or action not in ("download", "ping", "bring_to_front"):
+        return f"Unsupported or missing action: {action}"
+    if action == "download":
+        url = msg.get("url")
+        if not url or not isinstance(url, str) or not url.strip():
+            return "Missing or empty download URL"
+        url_lower = url.strip().lower()
+        if not (url_lower.startswith("http://") or url_lower.startswith("https://") or
+                url_lower.startswith("ftp://") or url_lower.startswith("blob:") or
+                url_lower.startswith("data:")):
+            return f"Invalid URL scheme: {url[:30]}"
+    return None
 
-    candidates = [
-        os.path.join(cur_dir, "Aegis Download Manager.exe"),
-        os.path.join(cur_dir, "dist", "Aegis Download Manager.exe"),
-        os.path.join(cur_dir, "..", "Aegis Download Manager.exe"),
-        os.path.join(cur_dir, "..", "dist", "Aegis Download Manager.exe"),
-        r"E:\reverse\AegisDownloadManager\Aegis Download Manager.exe",
-        r"E:\reverse\AegisDownloadManager\dist\Aegis Download Manager.exe",
-    ]
-    for exe in candidates:
-        abs_exe = os.path.abspath(exe)
-        if os.path.exists(abs_exe):
-            try:
-                cmd = [abs_exe]
-                if url:
-                    cmd.extend(["/d", url])
-                if filename:
-                    cmd.extend(["/f", filename])
-                if format_id:
-                    cmd.extend(["/format", format_id])
-
-                if sys.platform == "win32":
+def find_aegis_executable() -> Optional[str]:
+    """Locates the Aegis desktop application executable from installation or workspace paths."""
+    # 1. Check Windows Registry (Installed Aegis)
+    if sys.platform == "win32":
+        try:
+            import winreg
+            for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for subkey in (r"Software\AegisDownloadManager", r"Software\Wow6432Node\AegisDownloadManager"):
                     try:
-                        args_str = " ".join(f'"{a}"' if " " in a else a for a in cmd[1:])
-                        os.startfile(abs_exe, arguments=args_str)
-                        log_debug(f"Successfully launched Aegis via os.startfile from {abs_exe} with args: {args_str}")
-                        return True
-                    except Exception as ex_start:
-                        log_debug(f"os.startfile failed: {ex_start}, falling back to Popen")
+                        with winreg.OpenKey(root, subkey) as k:
+                            val, _ = winreg.QueryValueEx(k, "Path")
+                            if val and os.path.isfile(val):
+                                return os.path.abspath(val)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
-                # Fallback: DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200)
-                flags = 0x00000208 if sys.platform == "win32" else 0
-                subprocess.Popen(cmd, creationflags=flags)
-                log_debug(f"Successfully launched Aegis from {abs_exe} with args: {cmd[1:]}")
-                return True
-            except Exception as e:
-                log_debug(f"Failed to launch {abs_exe}: {e}")
-    log_debug("Could not find any Aegis Download Manager executable")
-    return False
+    # 2. Check path relative to native host binary
+    if getattr(sys, "frozen", False):
+        host_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        host_dir = os.path.dirname(os.path.abspath(__file__))
+
+    relative_candidates = [
+        os.path.join(host_dir, "Aegis Download Manager.exe"),
+        os.path.join(host_dir, "..", "Aegis Download Manager.exe"),
+        os.path.join(host_dir, "..", "dist", "Aegis Download Manager.exe"),
+        os.path.join(host_dir, "dist", "Aegis Download Manager.exe"),
+    ]
+    for cand in relative_candidates:
+        norm = os.path.normpath(cand)
+        if os.path.isfile(norm):
+            return norm
+
+    # 3. Development fallback (Python script)
+    dev_candidates = [
+        os.path.join(host_dir, "..", "main.py"),
+        os.path.join(host_dir, "main.py"),
+    ]
+    for cand in dev_candidates:
+        norm = os.path.normpath(cand)
+        if os.path.isfile(norm):
+            return norm
+
+    return None
+
+def launch_aegis(executable_path: str) -> bool:
+    """Launches the Aegis desktop application in a detached process."""
+    log_debug(f"Launching desktop application: {executable_path}")
+    try:
+        if executable_path.lower().endswith(".py"):
+            py_exe = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.isfile(py_exe):
+                py_exe = sys.executable
+            cmd = [py_exe, executable_path]
+        else:
+            cmd = [executable_path]
+
+        # Use CREATE_BREAKAWAY_FROM_JOB (0x01000000) | DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200)
+        # to ensure the desktop application survives browser and native host process termination.
+        flags = 0x00000208
+        if sys.platform == "win32":
+            flags |= 0x01000000
+
+        try:
+            p = subprocess.Popen(
+                cmd,
+                cwd=os.path.dirname(executable_path),
+                creationflags=flags,
+                close_fds=True
+            )
+            log_debug(f"Spawned Aegis process successfully (PID {p.pid})")
+            return True
+        except Exception as e_breakaway:
+            log_debug(f"Breakaway flags rejected ({e_breakaway}), falling back to standard detached")
+            p = subprocess.Popen(
+                cmd,
+                cwd=os.path.dirname(executable_path),
+                creationflags=0x00000208,
+                close_fds=True
+            )
+            log_debug(f"Spawned Aegis process with fallback flags (PID {p.pid})")
+            return True
+    except Exception as e:
+        log_debug(f"Failed to launch Aegis process: {e}")
+        return False
 
 def main():
-    log_debug("aegis_host invoked")
+    log_debug("=== Native host invoked ===")
     msg = read_native_message()
     if not msg:
-        log_debug("No native message, exiting")
         sys.exit(0)
 
-    # Try sending to running Aegis via named pipe
-    reply = send_ipc_message(msg, timeout_ms=1500)
-    log_debug(f"Initial IPC reply: {reply}")
-    if not reply:
-        # Launch Aegis and try again
-        log_debug("Aegis not responding, attempting to launch")
-        ensure_aegis_running(
-            url=msg.get("url", ""),
-            filename=msg.get("filename", ""),
-            format_id=msg.get("format_id", "")
-        )
-        reply = send_ipc_message(msg, timeout_ms=4000)
-        log_debug(f"Post-launch IPC reply: {reply}")
+    # 1. Validate incoming request
+    validation_err = validate_request(msg)
+    if validation_err:
+        log_debug(f"Validation failed: {validation_err}")
+        send_native_response({"status": "error", "error": validation_err})
+        sys.exit(0)
 
-    if reply:
-        send_native_response(reply)
-        log_debug("Sent success response to browser")
-    else:
-        # Fallback: Save to browser queue in AppData so Aegis picks it up on next start
-        app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
-        os.makedirs(app_data, exist_ok=True)
-        queue_file = os.path.join(app_data, "browser_queue.json")
+    # 2. Fast Path: Check if Aegis is already running and responsive
+    reply = send_ipc_message(msg, timeout_ms=350)
+    if reply and reply.get("status") == "ok":
+        log_debug("Aegis is running. Forwarded request directly and received acceptance.")
+        send_native_response({"status": "ok", "message": reply.get("message", "Task accepted by Aegis")})
+        sys.exit(0)
+
+    # 3. Slow Path: Aegis is closed or starting up
+    log_debug("Aegis is not currently responding. Entering startup and synchronization sequence.")
+
+    # Prevent concurrent duplicate launches using a Windows Named Mutex
+    h_mutex = None
+    if kernel32:
         try:
-            existing = []
-            if os.path.exists(queue_file):
-                with open(queue_file, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-            existing.append(msg)
-            with open(queue_file, "w", encoding="utf-8") as f:
-                json.dump(existing, f, indent=2)
-            log_debug("Enqueued message to browser_queue.json")
-            send_native_response({"status": "queued", "message": "Saved to Aegis launch queue"})
+            h_mutex = kernel32.CreateMutexW(None, False, "Local\\Aegis_DM_Startup_Lock")
+            if h_mutex:
+                # Wait up to 15 seconds to acquire startup lock
+                kernel32.WaitForSingleObject(h_mutex, 15000)
         except Exception as e:
-            log_debug(f"Failed writing browser queue: {e}")
-            send_native_response({"status": "error", "message": f"Could not reach Aegis: {str(e)}"})
+            log_debug(f"Mutex creation warning: {e}")
+
+    try:
+        # Re-check if Aegis became available while waiting on the lock
+        reply = send_ipc_message(msg, timeout_ms=300)
+        if reply and reply.get("status") == "ok":
+            log_debug("Aegis became available while waiting on lock. Request forwarded successfully.")
+            send_native_response({"status": "ok", "message": reply.get("message", "Task accepted by Aegis")})
+            sys.exit(0)
+
+        # 4. Locate Aegis executable
+        aegis_exe = find_aegis_executable()
+        if not aegis_exe:
+            err_msg = "Aegis Download Manager executable could not be found."
+            log_debug(f"ERROR: {err_msg}")
+            send_native_response({"status": "error", "error": err_msg})
+            sys.exit(0)
+
+        # 5. Launch Aegis cleanly
+        started = launch_aegis(aegis_exe)
+        if not started:
+            err_msg = "Failed to launch Aegis Download Manager process."
+            log_debug(f"ERROR: {err_msg}")
+            send_native_response({"status": "error", "error": err_msg})
+            sys.exit(0)
+
+        # 6. Bounded polling for IPC endpoint readiness and task acceptance
+        timeout_seconds = 16.0
+        start_wait = time.time()
+        final_reply = None
+
+        log_debug(f"Waiting up to {timeout_seconds}s for Aegis IPC server to accept request...")
+        while (time.time() - start_wait) < timeout_seconds:
+            # Poll named pipe with 400ms timeout
+            res = send_ipc_message(msg, timeout_ms=400)
+            if res:
+                final_reply = res
+                break
+            time.sleep(0.2)
+
+        # 7. Evaluate confirmation and dispatch response
+        if final_reply and final_reply.get("status") == "ok":
+            log_debug(f"SUCCESS: Aegis confirmed task acceptance: {final_reply}")
+            send_native_response({
+                "status": "ok",
+                "message": final_reply.get("message", "Task accepted by Aegis Download Manager")
+            })
+        elif final_reply and final_reply.get("status") == "error":
+            err_msg = final_reply.get("message", "Aegis rejected task")
+            log_debug(f"ERROR: Aegis returned rejection: {err_msg}")
+            send_native_response({"status": "error", "error": err_msg})
+        else:
+            err_msg = "Aegis Download Manager was started but did not respond to IPC within 16 seconds."
+            log_debug(f"TIMEOUT: {err_msg}")
+            send_native_response({"status": "error", "error": err_msg})
+
+    finally:
+        if kernel32 and h_mutex:
+            try:
+                kernel32.ReleaseMutex(h_mutex)
+                kernel32.CloseHandle(h_mutex)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()

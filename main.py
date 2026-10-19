@@ -153,8 +153,8 @@ def main():
         elif arg in ("/format", "--format") and i + 1 < len(sys.argv):
             fmt_to_add = sys.argv[i + 1]
 
+    from ipc_server import send_ipc_message
     if url_to_add:
-        from ipc_server import send_ipc_message
         msg = {
             "action": "download",
             "url": url_to_add,
@@ -162,6 +162,11 @@ def main():
             "format_id": fmt_to_add or ""
         }
         res = send_ipc_message(msg, timeout_ms=1000)
+        if res and res.get("status") == "ok":
+            sys.exit(0)
+    else:
+        # Single instance check: bring existing instance to foreground if already running
+        res = send_ipc_message({"action": "bring_to_front"}, timeout_ms=400)
         if res and res.get("status") == "ok":
             sys.exit(0)
 
