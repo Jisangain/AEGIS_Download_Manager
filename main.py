@@ -25,7 +25,7 @@ def attach_console_if_needed():
         except Exception:
             pass
 
-def run_cli_download(url: str, dest_dir: str, format_id: str = "", audio_only: bool = False) -> int:
+def run_cli_download(url: str, dest_dir: str, format_id: str = "", audio_only: bool = False, timeout: int = 120) -> int:
     from engine import Aria2Worker, DirectHttpWorker, YtDlpWorker, find_tool_binary
 
     app = QApplication.instance()
@@ -71,7 +71,7 @@ def run_cli_download(url: str, dest_dir: str, format_id: str = "", audio_only: b
     worker.start()
 
     start_t = time.time()
-    while not done[0] and (time.time() - start_t) < 120:
+    while not done[0] and (time.time() - start_t) < timeout:
         app.processEvents()
         time.sleep(0.05)
 
@@ -129,6 +129,19 @@ def main():
         app.setWindowIcon(QIcon(icon_path))
 
     # CLI / Automation mode
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(
+            "Aegis Download Manager - CLI Mode\n"
+            "Usage: python main.py --download <url> [--dest <folder>] [--format <id>] "
+            "[--audio-only] [--timeout <seconds>]\n"
+            "  --download     URL to download\n"
+            "  --dest         Destination folder (default: current directory)\n"
+            "  --format       yt-dlp format id (e.g. 1080p, bestaudio/best)\n"
+            "  --audio-only   Extract audio only (MP3)\n"
+            "  --timeout      Maximum seconds to wait (default: 120)\n"
+        )
+        sys.exit(0)
+
     if "--download" in sys.argv:
         idx = sys.argv.index("--download")
         if idx + 1 < len(sys.argv):
@@ -139,7 +152,20 @@ def main():
                 if d_idx + 1 < len(sys.argv):
                     dest = sys.argv[d_idx + 1]
             audio_only = "--audio-only" in sys.argv
-            sys.exit(run_cli_download(target_url, dest, audio_only=audio_only))
+            fmt = ""
+            if "--format" in sys.argv:
+                f_idx = sys.argv.index("--format")
+                if f_idx + 1 < len(sys.argv):
+                    fmt = sys.argv[f_idx + 1]
+            timeout = 120
+            if "--timeout" in sys.argv:
+                t_idx = sys.argv.index("--timeout")
+                if t_idx + 1 < len(sys.argv):
+                    try:
+                        timeout = max(1, int(sys.argv[t_idx + 1]))
+                    except ValueError:
+                        pass
+            sys.exit(run_cli_download(target_url, dest, format_id=fmt, audio_only=audio_only, timeout=timeout))
 
     # IDM-compatible /d, -d, --url arguments
     url_to_add = None
