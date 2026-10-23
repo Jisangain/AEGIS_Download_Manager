@@ -197,7 +197,7 @@ def main():
             sys.exit(0)
 
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     if url_to_add:
         from PyQt6.QtCore import QTimer

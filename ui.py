@@ -1844,6 +1844,7 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(["#", "File Name", "Size", "Progress", "Speed", "ETA", "Status", "Date Added"])
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -1870,17 +1871,20 @@ class MainWindow(QMainWindow):
         header.setHighlightSections(False)
         header.setSectionsClickable(True)
         header.setSortIndicatorShown(True)
+        # Keep the filename column directly resizable. Stretch mode hides the
+        # section handle, making long filenames impossible to reveal by dragging.
+        header.setMinimumSectionSize(48)
+        header.setToolTip("Drag a column edge to resize it. Drag a header to reorder columns.")
 
-        self.table.setColumnWidth(0, 48)   # ID
-        self.table.setColumnWidth(2, 130)  # Size
-        self.table.setColumnWidth(3, 170)  # Progress
-        self.table.setColumnWidth(4, 95)   # Speed
-        self.table.setColumnWidth(5, 75)   # ETA
-        self.table.setColumnWidth(6, 110)  # Status
-        self.table.setColumnWidth(7, 140)  # Date Added
+        self._table_column_base_widths = (42, 180, 95, 135, 80, 62, 100, 115)
+        for column, width in enumerate(self._table_column_base_widths):
+            self.table.setColumnWidth(column, width)
+        header_item = self.table.horizontalHeaderItem(1)
+        if header_item:
+            header_item.setToolTip("Drag the right edge of this column to resize it.")
 
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # File Name stretches to 100% of available width!
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
@@ -2178,6 +2182,25 @@ class MainWindow(QMainWindow):
                     if not data.get("scheduled_time"):
                         self._start_task(task_id, data["connections"])
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "table"):
+            QTimer.singleShot(0, self._fit_table_columns)
+
+    def _fit_table_columns(self):
+        if not hasattr(self, "table"):
+            return
+
+        available_width = self.table.viewport().width()
+        base_widths = self._table_column_base_widths
+        scale = available_width / sum(base_widths)
+        widths = [max(48, round(width * scale)) for width in base_widths]
+        # Put any rounding/minimum-size remainder into the filename column so
+        # all sections fill the viewport without a horizontal scrollbar.
+        widths[1] += available_width - sum(widths)
+        for column, width in enumerate(widths):
+            self.table.setColumnWidth(column, width)
+
     def _force_bring_to_foreground(self):
         self.show()
         self.raise_()
@@ -2353,7 +2376,8 @@ class MainWindow(QMainWindow):
             # Col 1: Filename
             fn_item = NumericTableWidgetItem(filename, sort_val=filename.lower())
             fn_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-            fn_font = QFont("Segoe UI", 9)
+            has_bengali = any("\u0980" <= char <= "\u09FF" for char in filename)
+            fn_font = QFont("Nirmala UI" if has_bengali else "Segoe UI", 9)
             fn_font.setBold(True)
             fn_item.setFont(fn_font)
             fn_item.setToolTip(f"{filename}\nURL: {t.get('url', '')}\nSaved: {t.get('save_path', '')}")

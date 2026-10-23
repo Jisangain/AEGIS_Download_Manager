@@ -1,0 +1,21 @@
+{
+  "name": "aegisdownloadmanager",
+  "version": "1.0.0",
+  "description": "A clean, modular, and high-performance desktop download manager built with **PyQt6**, **aria2c**, and **yt-dlp**.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaberDevHub/AEGIS---Download-Manager.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jaberDevHub/AEGIS---Download-Manager/issues"
+  },
+  "homepage": "https://github.com/jaberDevHub/AEGIS---Download-Manager#readme"
+}

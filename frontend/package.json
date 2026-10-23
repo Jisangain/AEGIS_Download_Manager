@@ -1,0 +1,48 @@
+{
+  "name": "aegis-frontend",
+  "version": "1.0.0",
+  "description": "Aegis Download Manager — Windows 11 Fluent frontend (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder",
+    "package": "npm run build"
+  },
+  "keywords": [
+    "aegis",
+    "download-manager",
+    "electron",
+    "fluent-design"
+  ],
+  "author": "Aegis Download Manager",
+  "license": "MIT",
+  "build": {
+    "appId": "com.aegis.downloadmanager",
+    "productName": "Aegis Download Manager",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": false,
+      "perMachine": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}
