@@ -1,7 +1,7 @@
 const status = document.getElementById("status");
 const button = document.getElementById("check");
 
-button.addEventListener("click", () => {
+function checkConnection() {
   button.disabled = true;
   status.className = "";
   status.textContent = "Checking native host…";
@@ -16,4 +16,7 @@ button.addEventListener("click", () => {
     status.className = "ok";
     status.textContent = "Connected. The browser can reach the Aegis native host.";
   });
-});
+}
+
+button.addEventListener("click", checkConnection);
+checkConnection();

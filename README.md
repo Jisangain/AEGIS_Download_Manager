@@ -2,12 +2,6 @@
 
 Aegis is a desktop download manager built with Python and PyQt6. It provides a download queue, aria2 and HTTP download engines, yt-dlp media downloads, scheduling, archive extraction, checksums, and an optional browser extension that sends links to the desktop app.
 
-## Download
-
-- **Windows:** [Download the v1.0.0 executable](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/download/v1.0.0/Aegis.Download.Manager.exe)
-- [All GitHub releases](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases)
-- **Linux:** No prebuilt Linux release is currently documented; build from source below.
-
 The Windows browser integration needs a native messaging host executable. Download the [Aegis Browser Extension ZIP release asset](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/latest/download/Aegis-Browser-Extension.zip); the GitHub **Code → Download ZIP** source archive does not include that executable. The extension bundle runs without Python installed. The link works after this ZIP is attached to a GitHub release.
 
 ## Repository layout
@@ -124,7 +118,7 @@ On Windows, install `requirements.txt` and PyInstaller, then run `build_exe.bat`
 1. Download and extract the **Aegis Browser Extension ZIP** release asset to a permanent folder.
 2. Run `install_host.bat` from that folder. It opens the browser extensions page and waits while you enable Developer mode and choose **Load unpacked** for that same folder.
 3. The installer detects the extension ID and registers the bundled native host automatically. Keep its window open until it reports completion; no ID copying, second installer run, or Python installation is needed.
-4. Restart the browser, launch Aegis, click the extension icon, and choose **Check connection**. Keep the extracted folder in the same location.
+4. Restart the browser, launch Aegis, and click the extension icon to see its automatic connection check. Keep the extracted folder in the same location.
 
 Chromium requires a user to load unpacked extensions in Developer mode. If Aegis reports a host authorization or missing-host error, run `install_host.bat` again from the extracted folder, then restart the browser. Installing directly from the browser store would remove the unpacked-extension step; that requires publishing Aegis in each browser’s extension store.
 

@@ -10,7 +10,7 @@ Setup:
 2. Run install_host.bat. It opens a browser extensions page and waits for setup.
 3. In that browser, enable Developer mode, choose Load unpacked, and select the extracted folder containing manifest.json. The installer detects the extension ID and registers the native host automatically; do not close its window.
 4. When the installer says setup is complete, restart the browser and launch Aegis Download Manager.
-5. Click the Aegis toolbar icon, then **Check connection**. A green Connected message confirms the extension can reach its native host.
+5. Click the Aegis toolbar icon. It checks the connection automatically and displays Connected if the native host is reachable.
 
 The extension must be loaded from the same extracted folder that contains install_host.bat. The browser requires Developer mode and the Load unpacked action for an unpacked extension. No extension ID copying or second installer run is needed.
 

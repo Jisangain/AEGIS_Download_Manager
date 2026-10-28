@@ -42,6 +42,7 @@ function Get-LoadedAegisExtensionIds([string[]]$UserDataRoots) {
 }
 
 $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+$programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
 $chromeUserData = Join-Path $localAppData 'Google\Chrome\User Data'
 $braveUserData = Join-Path $localAppData 'BraveSoftware\Brave-Browser\User Data'
 $edgeUserData = Join-Path $localAppData 'Microsoft\Edge\User Data'
@@ -52,16 +53,15 @@ if ($chromeIds.Count -eq 0 -and $edgeIds.Count -eq 0) {
     Write-Host 'Aegis browser setup' -ForegroundColor Cyan
     Write-Host '1. In the browser page that opens, turn on Developer mode.'
     Write-Host '2. Choose Load unpacked and select this folder:' -ForegroundColor Yellow
-    Write-Host "Select this exact folder: $extensionDir"
     Write-Host 'Keep this window open. The extension ID will be detected and registered automatically.'
 
     $browserChoices = @(
         @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
-        @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
+        @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path $programFilesX86 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
         @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path $localAppData 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
         @{ Name = 'Brave'; UserData = $braveUserData; Executable = (Join-Path $env:ProgramFiles 'BraveSoftware\Brave-Browser\Application\brave.exe'); Url = 'brave://extensions' },
-        @{ Name = 'Brave'; UserData = $braveUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'BraveSoftware\Brave-Browser\Application\brave.exe'); Url = 'brave://extensions' },
-        @{ Name = 'Edge'; UserData = $edgeUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'); Url = 'edge://extensions' },
+        @{ Name = 'Brave'; UserData = $braveUserData; Executable = (Join-Path $programFilesX86 'BraveSoftware\Brave-Browser\Application\brave.exe'); Url = 'brave://extensions' },
+        @{ Name = 'Edge'; UserData = $edgeUserData; Executable = (Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe'); Url = 'edge://extensions' },
         @{ Name = 'Edge'; UserData = $edgeUserData; Executable = (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'); Url = 'edge://extensions' }
     )
     $browser = $browserChoices | Where-Object { Test-Path -LiteralPath $_.Executable -PathType Leaf } | Select-Object -First 1
@@ -149,4 +149,4 @@ foreach ($registration in $registrations) {
 Write-Host 'Aegis browser integration installed and verified:' -ForegroundColor Green
 foreach ($registration in $registrations) { Write-Host "  $($registration.Browser)" }
 Write-Host 'Restart the browser. The extension ID was detected automatically; no ID entry was needed.'
-Write-Host 'After restarting, click the Aegis extension and use its download button to confirm the connection.'
+Write-Host 'After restarting, click the Aegis extension to see its automatic connection check.'
