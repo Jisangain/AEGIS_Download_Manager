@@ -4,8 +4,8 @@ A clean, modular, and high-performance desktop download manager built with **PyQ
 
 ## Direct Download
 
-- **Windows 64-bit:** [Download the latest Aegis executable](https://github.com/jaberDevHub/AEGIS---Download-Manager/releases/latest/download/Aegis-Download-Manager.exe) (standalone `.exe`)
-- [Browse all GitHub releases](https://github.com/jaberDevHub/AEGIS---Download-Manager/releases)
+- **Windows 64-bit:** [Download Aegis Download Manager v1.0.0](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/download/v1.0.0/Aegis.Download.Manager.exe) (standalone `.exe`)
+- [Browse all GitHub releases](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases)
 - **Linux:** Build from source using the [Linux instructions](#linux-build-and-browser-integration). A prebuilt Linux download is not available yet.
 
 The direct Windows link works after a GitHub Release has been published with an asset named exactly `Aegis-Download-Manager.exe`.
