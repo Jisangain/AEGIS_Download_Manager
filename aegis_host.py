@@ -202,6 +202,10 @@ def main():
         send_native_response({"status": "error", "error": validation_err})
         sys.exit(0)
 
+    if msg.get("action") == "ping":
+        send_native_response({"status": "ok", "message": "Aegis native messaging host is reachable"})
+        sys.exit(0)
+
     # 2. Fast Path: Check if Aegis is already running and responsive
     reply = send_ipc_message(msg, timeout_ms=350)
     if reply and reply.get("status") == "ok":

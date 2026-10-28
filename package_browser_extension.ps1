@@ -10,6 +10,8 @@ $requiredFiles = @(
     'background.js',
     'content.js',
     'content.css',
+    'popup.html',
+    'popup.js',
     'aegis_host.exe',
     'install_host.bat',
     'install_host.ps1',

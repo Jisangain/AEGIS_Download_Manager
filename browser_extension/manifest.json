@@ -29,6 +29,7 @@
     }
   ],
   "action": {
-    "default_title": "Aegis Download Manager"
+    "default_title": "Aegis Download Manager",
+    "default_popup": "popup.html"
   }
 }

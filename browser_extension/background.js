@@ -38,6 +38,19 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Listener for messages from DOM content script (floating video download button)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request && request.action === "check-connection") {
+    chrome.runtime.sendNativeMessage(HOST_NAME, { action: "ping" }, (response) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ status: "error", error: chrome.runtime.lastError.message });
+      } else if (!response || response.status !== "ok") {
+        sendResponse({ status: "error", error: response && response.error || "The native host did not respond." });
+      } else {
+        sendResponse({ status: "ok", message: "Aegis native host is connected." });
+      }
+    });
+    return true;
+  }
+
   if (request && request.action === "download") {
     try {
       chrome.runtime.sendNativeMessage(HOST_NAME, request, (response) => {

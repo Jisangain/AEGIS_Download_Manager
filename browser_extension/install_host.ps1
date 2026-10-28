@@ -42,20 +42,49 @@ function Get-LoadedAegisExtensionIds([string[]]$UserDataRoots) {
 }
 
 $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
-$chromeIds = Get-LoadedAegisExtensionIds @(
-    (Join-Path $localAppData 'Google\Chrome\User Data'),
-    (Join-Path $localAppData 'BraveSoftware\Brave-Browser\User Data')
-)
-$edgeIds = Get-LoadedAegisExtensionIds @(
-    (Join-Path $localAppData 'Microsoft\Edge\User Data')
-)
+$chromeUserData = Join-Path $localAppData 'Google\Chrome\User Data'
+$braveUserData = Join-Path $localAppData 'BraveSoftware\Brave-Browser\User Data'
+$edgeUserData = Join-Path $localAppData 'Microsoft\Edge\User Data'
+$chromeIds = Get-LoadedAegisExtensionIds @($chromeUserData, $braveUserData)
+$edgeIds = Get-LoadedAegisExtensionIds @($edgeUserData)
 
 if ($chromeIds.Count -eq 0 -and $edgeIds.Count -eq 0) {
-    Write-Host 'Aegis extension was not found in Chrome, Brave, or Edge.' -ForegroundColor Yellow
-    Write-Host 'First extract this ZIP to a permanent folder, open the browser extensions page, enable Developer mode, and choose Load unpacked.'
+    Write-Host 'Aegis browser setup' -ForegroundColor Cyan
+    Write-Host '1. In the browser page that opens, turn on Developer mode.'
+    Write-Host '2. Choose Load unpacked and select this folder:' -ForegroundColor Yellow
     Write-Host "Select this exact folder: $extensionDir"
-    Write-Host 'Then run install_host.bat again. You will not need to copy or type an extension ID.'
-    exit 1
+    Write-Host 'Keep this window open. The extension ID will be detected and registered automatically.'
+
+    $browserChoices = @(
+        @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
+        @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
+        @{ Name = 'Chrome'; UserData = $chromeUserData; Executable = (Join-Path $localAppData 'Google\Chrome\Application\chrome.exe'); Url = 'chrome://extensions' },
+        @{ Name = 'Brave'; UserData = $braveUserData; Executable = (Join-Path $env:ProgramFiles 'BraveSoftware\Brave-Browser\Application\brave.exe'); Url = 'brave://extensions' },
+        @{ Name = 'Brave'; UserData = $braveUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'BraveSoftware\Brave-Browser\Application\brave.exe'); Url = 'brave://extensions' },
+        @{ Name = 'Edge'; UserData = $edgeUserData; Executable = (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'); Url = 'edge://extensions' },
+        @{ Name = 'Edge'; UserData = $edgeUserData; Executable = (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'); Url = 'edge://extensions' }
+    )
+    $browser = $browserChoices | Where-Object { Test-Path -LiteralPath $_.Executable -PathType Leaf } | Select-Object -First 1
+    if ($browser) {
+        Write-Host "Opening $($browser.Name) extensions..."
+        Start-Process -FilePath $browser.Executable -ArgumentList $browser.Url
+    } else {
+        Write-Host 'No supported browser executable was found. Open chrome://extensions, brave://extensions, or edge://extensions manually.' -ForegroundColor Yellow
+    }
+
+    $deadline = [DateTime]::UtcNow.AddMinutes(5)
+    do {
+        Start-Sleep -Seconds 2
+        $chromeIds = Get-LoadedAegisExtensionIds @($chromeUserData, $braveUserData)
+        $edgeIds = Get-LoadedAegisExtensionIds @($edgeUserData)
+        if ($chromeIds.Count -gt 0 -or $edgeIds.Count -gt 0) { break }
+        Write-Host 'Waiting for Aegis to be loaded...' -NoNewline
+        Write-Host "`r" -NoNewline
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($chromeIds.Count -eq 0 -and $edgeIds.Count -eq 0) {
+        throw 'Setup timed out before the Aegis extension was detected. Leave the extension page open and run install_host.bat again after loading this folder.'
+    }
 }
 
 $nativeManifestBase = [ordered]@{
@@ -120,3 +149,4 @@ foreach ($registration in $registrations) {
 Write-Host 'Aegis browser integration installed and verified:' -ForegroundColor Green
 foreach ($registration in $registrations) { Write-Host "  $($registration.Browser)" }
 Write-Host 'Restart the browser. The extension ID was detected automatically; no ID entry was needed.'
+Write-Host 'After restarting, click the Aegis extension and use its download button to confirm the connection.'

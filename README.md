@@ -76,7 +76,17 @@ AegisDownloadManager/
 - yt-dlp
 
 ### Windows: fresh setup
-From the extracted repository folder, double-click `setup_windows.bat`. It uses an existing Python 3.10+ installation or downloads the SHA-256-verified Python 3.13.17 installer, creates a project virtual environment, downloads and verifies FFmpeg into `tools/`, installs `requirements.txt`, and launches Aegis. The FFmpeg archive is about 109 MB. It does not require administrator access. Internet access is needed for first setup.
+
+From the extracted repository folder, double-click `setup_windows.bat`. The script performs the following steps:
+
+1. **Python detection** — Checks for an existing Python 3.10+ installation (via a project `.venv`, the `py.exe` launcher, or `python.exe` on `PATH`, excluding Microsoft Store stubs).
+2. **Python installation (if needed)** — If no suitable Python is found, downloads the official Python 3.13.17 installer from python.org and verifies its SHA-256 hash (`5da012101ba2e17113a9a1cd901e9ce1441086f2b7ecb5de06ec94163899a190`), then installs it silently to `%LOCALAPPDATA%\Programs\Python\Python313` without administrator access.
+3. **Virtual environment** — Creates a project virtual environment at `.venv` (or `.venv-aegis` if `.venv` exists but fails version validation).
+4. **FFmpeg installation** — If `tools/ffmpeg.exe` is missing or invalid, downloads the FFmpeg Windows essentials build from gyan.dev, verifies its SHA-256 checksum, extracts `ffmpeg.exe` into `tools/`, and confirms it runs. The FFmpeg archive is about 109 MB.
+5. **Python dependencies** — Upgrades `pip`, then installs packages from `requirements.txt`.
+6. **Launch** — Runs `main.py` from the project virtual environment.
+
+It does not require administrator access. Internet access is needed for the first setup (Python installer, FFmpeg archive, and Python packages).
 
 ### Linux or manual setup
 
@@ -112,11 +122,11 @@ On Windows, install `requirements.txt` and PyInstaller, then run `build_exe.bat`
 ## Browser extension
 
 1. Download and extract the **Aegis Browser Extension ZIP** release asset to a permanent folder.
-2. In Chrome, Brave, or Edge, open the extensions page, enable developer mode, and load the extracted folder containing `manifest.json` as unpacked.
-3. Run `install_host.bat` from that same folder. It detects the loaded extension automatically and registers the bundled native host; you do not need to copy or type an extension ID, and Python is not required.
-4. Restart the browser and launch Aegis. Keep the extracted folder in the same location after setup.
+2. Run `install_host.bat` from that folder. It opens the browser extensions page and waits while you enable Developer mode and choose **Load unpacked** for that same folder.
+3. The installer detects the extension ID and registers the bundled native host automatically. Keep its window open until it reports completion; no ID copying, second installer run, or Python installation is needed.
+4. Restart the browser, launch Aegis, click the extension icon, and choose **Check connection**. Keep the extracted folder in the same location.
 
-Chromium requires unpacked extensions to be loaded through the browser’s extensions page. If Aegis reports a host authorization or missing-host error, run `install_host.bat` again from the folder you loaded, then restart the browser.
+Chromium requires a user to load unpacked extensions in Developer mode. If Aegis reports a host authorization or missing-host error, run `install_host.bat` again from the extracted folder, then restart the browser. Installing directly from the browser store would remove the unpacked-extension step; that requires publishing Aegis in each browser’s extension store.
 
 For Linux source builds, load `dist/linux-package/browser_extension/` and run its `install_host_linux.sh` with the extension ID. Linux native-host setup requires Python 3.
 

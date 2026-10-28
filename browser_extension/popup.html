@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aegis Download Manager</title>
+  <style>
+    body { width: 270px; margin: 0; padding: 16px; background: #17191f; color: #f4f6fb; font: 14px Segoe UI, sans-serif; }
+    h1 { margin: 0 0 12px; font-size: 16px; }
+    #status { min-height: 36px; color: #b9c2d0; line-height: 1.4; }
+    button { width: 100%; margin-top: 10px; padding: 9px; border: 0; border-radius: 6px; background: #087cff; color: white; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .65; cursor: wait; }
+    .ok { color: #41d99b !important; }
+    .error { color: #ff7777 !important; }
+  </style>
+</head>
+<body>
+  <h1>Aegis Download Manager</h1>
+  <div id="status" role="status">Check that the browser can reach Aegis.</div>
+  <button id="check" type="button">Check connection</button>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -7,12 +7,12 @@ Requirements:
 
 Setup:
 1. Extract this ZIP to a permanent folder. Keep it there after setup.
-2. Open chrome://extensions, brave://extensions, or edge://extensions.
-3. Enable Developer mode, choose Load unpacked, and select the extracted folder containing manifest.json.
-4. Run install_host.bat. It detects the loaded extension automatically; you do not need to copy or enter its ID.
-5. Restart the browser and launch Aegis Download Manager.
+2. Run install_host.bat. It opens a browser extensions page and waits for setup.
+3. In that browser, enable Developer mode, choose Load unpacked, and select the extracted folder containing manifest.json. The installer detects the extension ID and registers the native host automatically; do not close its window.
+4. When the installer says setup is complete, restart the browser and launch Aegis Download Manager.
+5. Click the Aegis toolbar icon, then **Check connection**. A green Connected message confirms the extension can reach its native host.
 
-The extension must be loaded from the same extracted folder that contains install_host.bat. If setup says it cannot find the extension, check that folder selection and run install_host.bat again.
+The extension must be loaded from the same extracted folder that contains install_host.bat. The browser requires Developer mode and the Load unpacked action for an unpacked extension. No extension ID copying or second installer run is needed.
 
 The native host executable is included in this ZIP. Do not use the repository's
 Code > Download ZIP archive for Windows native messaging; source archives do not
