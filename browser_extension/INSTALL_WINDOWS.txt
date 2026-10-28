@@ -1,0 +1,18 @@
+Aegis Browser Extension for Windows
+
+Requirements:
+- Aegis Download Manager for Windows
+- Chrome, Brave, or Microsoft Edge
+- No Python installation is required
+
+Setup:
+1. Extract this ZIP to a permanent folder. Do not move the folder after setup.
+2. Open chrome://extensions, brave://extensions, or edge://extensions.
+3. Enable Developer mode and select Load unpacked. Select the extracted folder containing manifest.json.
+4. Copy the extension ID shown on the extension card.
+5. Run install_host.bat and paste that ID when prompted.
+6. Restart the browser and launch Aegis Download Manager.
+
+The native host executable is included in this ZIP. Do not use the repository's
+Code > Download ZIP archive for Windows native messaging; source archives do not
+include the packaged native host executable.

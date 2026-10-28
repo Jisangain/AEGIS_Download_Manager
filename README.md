@@ -8,7 +8,7 @@ Aegis is a desktop download manager built with Python and PyQt6. It provides a d
 - [All GitHub releases](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases)
 - **Linux:** No prebuilt Linux release is currently documented; build from source below.
 
-The browser extension is distributed in the repository under `browser_extension/`, not in the Windows executable.
+The Windows browser integration needs a native messaging host executable. Download the [Aegis Browser Extension ZIP release asset](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/latest/download/Aegis-Browser-Extension.zip); the GitHub **Code → Download ZIP** source archive does not include that executable. The extension bundle runs without Python installed. The link works after this ZIP is attached to a GitHub release.
 
 ## Repository layout
 
@@ -41,14 +41,16 @@ Use `python main.py --help` for supported options. The requirements file specifi
 
 ### Build
 
-On Windows, run `build_exe.bat`. On Linux, create and activate a virtual environment, install the application requirements and PyInstaller, then run `bash build_linux.sh`. The Linux script creates the application and extension package under `dist/linux-package/`. See the scripts for build prerequisites and output details.
+On Windows, run `build_exe.bat`. It builds the app and creates `dist/Aegis-Browser-Extension.zip` for publishing as a separate GitHub Release asset. On Linux, create and activate a virtual environment, install the application requirements and PyInstaller, then run `bash build_linux.sh`. The Linux script creates the application and extension package under `dist/linux-package/`. See the scripts for build prerequisites and output details.
 
 ## Browser extension
 
-1. Keep the repository or extracted package in a permanent folder.
-2. In the browser’s extensions page, enable developer mode and load `browser_extension/` as an unpacked extension (in a Linux package, use `dist/linux-package/browser_extension/`).
-3. On Windows, run `browser_extension/install_host.bat` after loading the extension. On Linux, run `install_host_linux.sh` from the packaged extension directory and provide the extension ID shown by the browser.
-4. Restart the browser. Keep Aegis running to accept browser requests.
+1. Download and extract the **Aegis Browser Extension ZIP** release asset to a permanent folder.
+2. In Chrome, Brave, or Edge, open the extensions page, enable developer mode, and load the extracted folder containing `manifest.json` as unpacked.
+3. Copy the extension ID shown on its card, then run `install_host.bat` from the extracted folder and paste the ID when prompted. This registers the bundled native host; Python is not required.
+4. Restart the browser and launch Aegis. Keep the extracted folder in the same location after setup.
+
+For Linux source builds, load `dist/linux-package/browser_extension/` and run its `install_host_linux.sh` with the extension ID. Linux native-host setup requires Python 3.
 
 ## Tests
 

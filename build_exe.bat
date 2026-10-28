@@ -26,6 +26,24 @@ pyinstaller --noconsole --onefile ^
 
 echo.
 echo Build finished! The executable is located in: dist\Aegis Download Manager.exe
+echo Building the Python-free browser native messaging host...
+pyinstaller --noconfirm --clean --onefile --name aegis_host ^
+    --distpath "browser_extension" ^
+    --workpath "build\native-host" ^
+    --specpath "build\native-host" ^
+    aegis_host.py
+if %errorlevel% neq 0 (
+    echo Native messaging host build failed.
+    pause
+    exit /b 1
+)
+echo Creating the browser extension release package...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package_browser_extension.ps1"
+if %errorlevel% neq 0 (
+    echo Browser extension package creation failed.
+    pause
+    exit /b 1
+)
 echo Updating the website download copy...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0sync_website_release.ps1"
 if %errorlevel% neq 0 (
