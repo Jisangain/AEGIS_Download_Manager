@@ -7,7 +7,40 @@ $chromeManifestPath = Join-Path $extensionDir "$hostName.json"
 $edgeManifestPath = Join-Path $extensionDir "$hostName.edge.json"
 
 if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
-    throw "Native host executable is missing: $hostPath`nUse the Aegis Browser Extension ZIP release asset, not the GitHub source ZIP."
+    $releaseZipUrl = 'https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/latest/download/Aegis-Browser-Extension.zip'
+    $tempZipPath = Join-Path ([IO.Path]::GetTempPath()) "Aegis-Browser-Extension-$PID.zip"
+    Write-Host 'Native host not present in the source archive; downloading the published host component...'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $releaseZipUrl -OutFile $tempZipPath -UseBasicParsing
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [IO.Compression.ZipFile]::OpenRead($tempZipPath)
+        try {
+            $hostEntry = $archive.Entries | Where-Object { $_.FullName -eq 'aegis_host.exe' } | Select-Object -First 1
+            if ($null -eq $hostEntry) {
+                throw 'The downloaded extension release does not contain aegis_host.exe.'
+            }
+            $entryStream = $hostEntry.Open()
+            $outputStream = [IO.File]::Create($hostPath)
+            try {
+                $entryStream.CopyTo($outputStream)
+            } finally {
+                $outputStream.Dispose()
+                $entryStream.Dispose()
+            }
+        } finally {
+            $archive.Dispose()
+        }
+        if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf) -or (Get-Item -LiteralPath $hostPath).Length -eq 0) {
+            throw 'The native host download was empty or incomplete.'
+        }
+        Write-Host 'Native host downloaded from the official Aegis GitHub release.' -ForegroundColor Green
+    } catch {
+        Remove-Item -LiteralPath $hostPath -Force -ErrorAction SilentlyContinue
+        throw "Could not obtain the Aegis native host. Check your internet connection and confirm the latest GitHub release includes Aegis-Browser-Extension.zip. Details: $($_.Exception.Message)"
+    } finally {
+        Remove-Item -LiteralPath $tempZipPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-LoadedAegisExtensionIds([string[]]$UserDataRoots) {

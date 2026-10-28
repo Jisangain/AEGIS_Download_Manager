@@ -2,7 +2,7 @@
 
 Aegis is a desktop download manager built with Python and PyQt6. It provides a download queue, aria2 and HTTP download engines, yt-dlp media downloads, scheduling, archive extraction, checksums, and an optional browser extension that sends links to the desktop app.
 
-The Windows browser integration needs a native messaging host executable. Download the [Aegis Browser Extension ZIP release asset](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/latest/download/Aegis-Browser-Extension.zip); the GitHub **Code → Download ZIP** source archive does not include that executable. The extension bundle runs without Python installed. The link works after this ZIP is attached to a GitHub release.
+The Windows browser integration uses a native messaging host executable. The [Aegis Browser Extension ZIP release asset](https://github.com/jaberDevHub/AEGIS_Download_Manager/releases/latest/download/Aegis-Browser-Extension.zip) includes it. If you use GitHub **Code → Download ZIP**, `install_host.bat` downloads the host component from the latest release automatically. Internet access is required for that fallback; Python is not.
 
 ## Repository layout
 
