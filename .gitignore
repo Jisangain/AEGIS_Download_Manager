@@ -50,6 +50,7 @@ venv.bak/
 *.spec
 *.exe
 !tools/qjs.exe
+!browser_extension/aegis_host.exe
 *.pdb
 *.zip
 

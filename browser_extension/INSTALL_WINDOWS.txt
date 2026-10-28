@@ -14,7 +14,7 @@ Setup:
 
 The extension must be loaded from the same extracted folder that contains install_host.bat. The browser requires Developer mode and the Load unpacked action for an unpacked extension. No extension ID copying or second installer run is needed.
 
-The recommended download is the Aegis Browser Extension ZIP release asset. If you
-use GitHub Code > Download ZIP, install_host.bat downloads the native host from
-the latest GitHub release. This fallback requires internet access; Python is not
-required.
+The recommended download is the Aegis Browser Extension ZIP release asset. The
+native host is also included in current GitHub Code > Download ZIP archives. If
+you use an older source archive without it, install_host.bat downloads it from
+the official repository. Python is not required.
