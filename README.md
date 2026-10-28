@@ -10,6 +10,13 @@ Aegis is a desktop download manager built with Python and PyQt6. It provides a d
 
 The browser extension is distributed in the repository under `browser_extension/`, not in the Windows executable.
 
+## Repository layout
+
+- Application modules and platform build scripts stay at the repository root because the build scripts reference them there.
+- `browser_extension/` contains the browser integration; `frontend/` contains the separate Electron prototype.
+- `tests/` contains test and validation scripts, with visual test assets in `tests/assets/`.
+- `docs/audits/` contains the earlier detailed audit report. The current security overview is [SECURITY.md](SECURITY.md).
+
 ## Requirements
 
 - Windows or Linux for the desktop application; build each packaged version on its target operating system.

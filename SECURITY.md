@@ -8,7 +8,7 @@ The extension requests access across sites and observes browser download/media a
 
 ## Review performed
 
-On 2026-10-28, the repository received a source-level security review focused on download transport, URL and message handling, filename/path use, process invocation, Defender scanning, archive extraction, IPC, extension DOM insertion, and dependency/build configuration. This review also retained findings and fixes from the earlier focused audit documented in `security_best_practices_report.md`.
+On 2026-10-28, the repository received a source-level security review focused on download transport, URL and message handling, filename/path use, process invocation, Defender scanning, archive extraction, IPC, extension DOM insertion, and dependency/build configuration. This review also retained findings and fixes from the earlier focused audit in [`docs/audits/security_best_practices_report.md`](docs/audits/security_best_practices_report.md).
 
 The following checks were run in the current working tree:
 

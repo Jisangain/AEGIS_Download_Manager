@@ -123,7 +123,7 @@ def run_test():
             print("   -", opt.inner_text().replace("\n", " | "))
 
         # Take screenshot of the open popup for visual verification
-        screenshot_path = os.path.join(REPO_ROOT, "youtube_dom_popup_screenshot.png")
+        screenshot_path = os.path.join(REPO_ROOT, "tests", "assets", "youtube_dom_popup_screenshot.png")
         page.screenshot(path=screenshot_path)
         print(f"PASS: Saved visual screenshot to: {screenshot_path}")
 
