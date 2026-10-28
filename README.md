@@ -21,7 +21,7 @@ The Windows browser integration needs a native messaging host executable. Downlo
 
 - Windows or Linux for the desktop application; build each packaged version on its target operating system.
 - Python 3.10 or newer to run from source.
-- `aria2c` is optional; without it, Aegis has a built-in HTTP downloader. `ffmpeg` is optional and is used for yt-dlp media merging and audio conversion.
+- `aria2c` is optional; without it, Aegis has a built-in HTTP downloader. `ffmpeg` is optional and is used for yt-dlp media merging and audio conversion. The Windows build bundles QuickJS-NG and yt-dlp’s EJS challenge support for YouTube downloads, so users do not need to install Python or a JavaScript runtime separately.
 - The browser integration supports Chromium-based browsers with native messaging. The extension requests broad site access to detect and hand off media/download links; review its permissions before enabling it.
 
 ## Run from source
@@ -41,14 +41,16 @@ Use `python main.py --help` for supported options. The requirements file specifi
 
 ### Build
 
-On Windows, run `build_exe.bat`. It builds the app and creates `dist/Aegis-Browser-Extension.zip` for publishing as a separate GitHub Release asset. On Linux, create and activate a virtual environment, install the application requirements and PyInstaller, then run `bash build_linux.sh`. The Linux script creates the application and extension package under `dist/linux-package/`. See the scripts for build prerequisites and output details.
+On Windows, install `requirements.txt` and PyInstaller, then run `build_exe.bat`. It builds the app with yt-dlp’s default YouTube challenge components and the bundled QuickJS-NG runtime, and creates `dist/Aegis-Browser-Extension.zip` for publishing as a separate GitHub Release asset. On Linux, create and activate a virtual environment, install the application requirements and PyInstaller, then run `bash build_linux.sh`. The Linux script creates the application and extension package under `dist/linux-package/`. See the scripts for build prerequisites and output details.
 
 ## Browser extension
 
 1. Download and extract the **Aegis Browser Extension ZIP** release asset to a permanent folder.
 2. In Chrome, Brave, or Edge, open the extensions page, enable developer mode, and load the extracted folder containing `manifest.json` as unpacked.
-3. Copy the extension ID shown on its card, then run `install_host.bat` from the extracted folder and paste the ID when prompted. This registers the bundled native host; Python is not required.
+3. Run `install_host.bat` from that same folder. It detects the loaded extension automatically and registers the bundled native host; you do not need to copy or type an extension ID, and Python is not required.
 4. Restart the browser and launch Aegis. Keep the extracted folder in the same location after setup.
+
+Chromium requires unpacked extensions to be loaded through the browser’s extensions page. If Aegis reports a host authorization or missing-host error, run `install_host.bat` again from the folder you loaded, then restart the browser.
 
 For Linux source builds, load `dist/linux-package/browser_extension/` and run its `install_host_linux.sh` with the extension ID. Linux native-host setup requires Python 3.
 

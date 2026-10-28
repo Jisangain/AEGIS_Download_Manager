@@ -184,15 +184,28 @@
         // Notify background script
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             chrome.runtime.sendMessage(payload, (res) => {
-                if (res && res.error) {
-                    showToast(`Error: ${res.error}`);
-                } else {
-                    showToast('Sent to Aegis Download Manager');
+                const runtimeError = chrome.runtime.lastError;
+                const error = runtimeError && runtimeError.message || res && res.error;
+                if (error || !res || res.status !== 'ok') {
+                    showToast(getConnectionError(error || 'Aegis did not confirm the request.'));
+                    return;
                 }
+                showToast('Sent to Aegis Download Manager');
             });
         } else {
-            showToast('Sent to Aegis Download Manager');
+            showToast('Aegis browser extension is not connected.');
         }
+    }
+
+    function getConnectionError(message) {
+        const error = String(message || 'Native messaging failed.');
+        if (/forbidden|not allowed/i.test(error)) {
+            return 'Aegis host is not authorized for this extension. Run install_host.bat from the extracted extension folder, then restart the browser.';
+        }
+        if (/not found|no such native|not installed|specified native messaging host/i.test(error)) {
+            return 'Aegis browser host is not installed. Run install_host.bat from the extracted extension folder, then restart the browser.';
+        }
+        return `Aegis connection failed: ${error}`;
     }
 
     function showToast(msg) {

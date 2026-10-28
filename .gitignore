@@ -49,6 +49,7 @@ venv.bak/
 *.manifest
 *.spec
 *.exe
+!tools/qjs.exe
 *.pdb
 *.zip
 

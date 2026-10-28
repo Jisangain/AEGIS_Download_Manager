@@ -2041,6 +2041,17 @@ class MainWindow(QMainWindow):
         self.insp_status_val = make_metric_row("Status:")
         insp_layout.addWidget(metrics_card)
 
+        self.insp_error_hdr = QLabel("ERROR DETAILS")
+        self.insp_error_hdr.setStyleSheet("font-size: 10px; font-weight: 700; color: #F87171; border: none; letter-spacing: 0.6px;")
+        self.insp_error_text = QTextEdit()
+        self.insp_error_text.setReadOnly(True)
+        self.insp_error_text.setMaximumHeight(88)
+        self.insp_error_text.setStyleSheet("background-color: rgba(127, 29, 29, 0.20); border: 1px solid rgba(248, 113, 113, 0.25); border-radius: 6px; color: #FCA5A5; font-size: 10px; padding: 4px;")
+        self.insp_error_hdr.setVisible(False)
+        self.insp_error_text.setVisible(False)
+        insp_layout.addWidget(self.insp_error_hdr)
+        insp_layout.addWidget(self.insp_error_text)
+
         # Source & Location Card
         loc_hdr = QLabel("SOURCE & LOCATION")
         loc_hdr.setStyleSheet("font-size: 10px; font-weight: 700; color: #64748B; border: none; letter-spacing: 0.6px;")
@@ -2557,6 +2568,16 @@ class MainWindow(QMainWindow):
         self.insp_eta_val.setText(task.get("eta") or "--")
         self.insp_status_val.setText(task.get("status", "--").capitalize())
 
+        error_message = (task.get("error_message") or "").strip()
+        if task.get("status") == "failed":
+            self.insp_error_hdr.setVisible(True)
+            self.insp_error_text.setPlainText(error_message or "The download failed without a detailed error message.")
+            self.insp_error_text.setVisible(True)
+        else:
+            self.insp_error_hdr.setVisible(False)
+            self.insp_error_text.clear()
+            self.insp_error_text.setVisible(False)
+
         worker = self.active_workers.get(task_id)
         conns = getattr(worker, "connections", 16) if worker else "--"
         self.insp_sockets_val.setText(str(conns))
@@ -2683,6 +2704,8 @@ class MainWindow(QMainWindow):
 
     def _on_worker_status(self, task_id: int, status: str, err: str):
         self.db.update_status(task_id, status, err)
+        if self.active_inspector_id == task_id and self.inspector_panel.isVisible():
+            self._open_inspector(task_id)
         if status in ("completed", "failed", "cancelled", "paused"):
             self._worker_speeds.pop(task_id, None)
             if task_id in self.active_workers:
