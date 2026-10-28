@@ -21,7 +21,7 @@ The Windows browser integration needs a native messaging host executable. Downlo
 
 - Windows or Linux for the desktop application; build each packaged version on its target operating system.
 - Python 3.10 or newer to run from source.
-- `aria2c` is optional; without it, Aegis has a built-in HTTP downloader. `ffmpeg` is optional and is used for yt-dlp media merging and audio conversion. The Windows build bundles QuickJS-NG and yt-dlp’s EJS challenge support for YouTube downloads, so users do not need to install Python or a JavaScript runtime separately.
+- `aria2c` is optional; without it, Aegis has a built-in HTTP downloader. FFmpeg is required to merge separate video and audio streams, which YouTube commonly uses for 1080p and higher. If FFmpeg is missing, Aegis reports the requirement instead of silently switching to a lower-quality stream. Install FFmpeg and set its executable path in Settings (or make it available on `PATH`). The Windows build bundles QuickJS-NG and yt-dlp’s EJS challenge support, so users do not need Python or a JavaScript runtime separately.
 - The browser integration supports Chromium-based browsers with native messaging. The extension requests broad site access to detect and hand off media/download links; review its permissions before enabling it.
 
 ## Run from source

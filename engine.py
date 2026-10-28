@@ -253,6 +253,8 @@ class UrlAnalyzerThread(QThread):
                             if vf["sz"] > 0:
                                 mb = vf["sz"] / (1024 * 1024)
                                 parts.append(f"~{mb:.1f} MB" if mb < 1024 else f"~{mb/1024:.2f} GB")
+                            if not vf["has_audio"] and not ffmpeg_bin:
+                                parts.append("FFmpeg required to merge audio")
 
                             label = " • ".join(parts)
                             fmt_id = f"{vf['fid']}/best" if vf["has_audio"] else f"{vf['fid']}+bestaudio/best"
@@ -544,8 +546,14 @@ class YtDlpWorker(BaseDownloadWorker):
                     "preferredquality": "192",
                 }]
         elif "+" in self.format_id:
-            # If FFmpeg is missing, prefer single container format to avoid unmerged streams
-            ydl_opts["format"] = "best[ext=mp4]/best"
+            self.status_signal.emit(
+                self.task_id,
+                "failed",
+                "This selected quality has separate video and audio streams, but FFmpeg was not found. "
+                "Install FFmpeg or set its executable path in Settings, then retry. "
+                "Aegis stopped instead of silently downloading a lower resolution."
+            )
+            return
 
         try:
             self.status_signal.emit(self.task_id, "downloading", "")

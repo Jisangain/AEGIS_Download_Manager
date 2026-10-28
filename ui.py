@@ -1108,8 +1108,8 @@ class SettingsDialog(QDialog):
 
         # ffmpeg path
         ff_layout = QHBoxLayout()
-        ff_lbl = QLabel("FFmpeg Executable:")
-        ff_lbl.setFixedWidth(110)
+        ff_lbl = QLabel("FFmpeg (4K audio merge):")
+        ff_lbl.setFixedWidth(165)
         self.ff_input = QLineEdit(self.db.get_setting("ffmpeg_path", ""))
         self.ff_input.setPlaceholderText("Auto-detected if left empty")
         ff_layout.addWidget(ff_lbl)
@@ -1164,7 +1164,7 @@ class SettingsDialog(QDialog):
             if not self.ff_input.text():
                 self.ff_input.setText(ff_bin)
         else:
-            msgs.append("ffmpeg: Not found")
+            msgs.append("ffmpeg: Needed for separate audio/video streams (often 1080p+)")
 
         self.detect_info.setText(" | ".join(msgs))
 
