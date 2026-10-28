@@ -91,25 +91,35 @@ python main.py
 
 ---
 
-## Browser Extension Installation on Windows
+## Browser Extension: Download, Install, and Use
 
-Aegis includes an independent Manifest V3 browser extension and a native messaging host that forwards browser downloads to Aegis via a local Windows Named Pipe (`\\.\pipe\Aegis_Download_Manager_Pipe`).
+The browser extension is included in the source repository under `browser_extension/`; it is not a separate download in the Windows `.exe` release. Keep the extracted repository folder in a permanent location because the native host runs from that folder.
 
-### Step 1: Register the Native Host
-Run as Administrator or regular user:
-```cmd
-browser_extension\install_host.bat
-```
-This registers `com.aegis.downloadmanager` in the Windows Registry under:
-- `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.aegis.downloadmanager`
-- `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.aegis.downloadmanager`
+### Windows (Chrome, Edge, or Brave)
 
-### Step 2: Load Extension in Browser
-1. In Google Chrome or Microsoft Edge, navigate to `chrome://extensions` or `edge://extensions`.
-2. Toggle on **Developer Mode** (top right corner).
-3. Click **Load unpacked**.
-4. Select the `AegisDownloadManager/browser_extension` folder.
-5. Right-click any link, video, or page in the browser and choose **Download with Aegis**.
+1. Download the repository as a ZIP: open the GitHub repository, choose **Code → Download ZIP**, and extract it somewhere permanent (for example, `C:\Apps\AegisDownloadManager`).
+2. Install and open Aegis Download Manager. Leave it running while sending downloads from the browser.
+3. In the extracted folder, run `browser_extension\install_host.bat`. Administrator access is not normally needed; the script registers the native messaging host for your Windows user. Keep the extracted folder where it is after installation.
+4. Open your browser’s extension page: `chrome://extensions`, `edge://extensions`, or `brave://extensions`.
+5. Turn on **Developer mode**, click **Load unpacked**, and select the extracted `browser_extension` folder.
+6. If the extension does not appear immediately, restart the browser.
+
+To use it, right-click a link and choose **Download with Aegis**. For supported media, right-click the media and choose **Download Media with Aegis**; to pass the current page, right-click the page and choose **Download Page / Video with Aegis**. Aegis must be running to receive the request.
+
+### Linux (Chrome, Chromium, Brave, or Edge)
+
+Build the Linux package first using the instructions below. Then:
+
+1. Run `dist/linux-package/aegis-download-manager` once.
+2. Open the browser’s extensions page, enable **Developer mode**, choose **Load unpacked**, and select `dist/linux-package/browser_extension/`.
+3. Copy the extension ID shown on the extension card.
+4. Run the native host installer with that ID:
+
+   ```bash
+   bash dist/linux-package/browser_extension/install_host_linux.sh YOUR_EXTENSION_ID
+   ```
+
+5. Restart the browser and leave Aegis running when using **Download with Aegis** from the right-click menu.
 
 ## Linux Build and Browser Integration
 
