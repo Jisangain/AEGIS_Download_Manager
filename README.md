@@ -4,8 +4,19 @@ A clean, modular, and high-performance desktop download manager built with **PyQ
 
 ## Direct Download
 
-- **Windows 64-bit:** [Download Aegis Download Manager](https://aegis-download-manager.vercel.app/downloads/Aegis-Download-Manager.exe) (standalone `.exe`, no release package required)
+- **Windows 64-bit:** [Download the latest Aegis executable](https://github.com/jaberDevHub/AEGIS---Download-Manager/releases/latest/download/Aegis-Download-Manager.exe) (standalone `.exe`)
+- [Browse all GitHub releases](https://github.com/jaberDevHub/AEGIS---Download-Manager/releases)
 - **Linux:** Build from source using the [Linux instructions](#linux-build-and-browser-integration). A prebuilt Linux download is not available yet.
+
+The direct Windows link works after a GitHub Release has been published with an asset named exactly `Aegis-Download-Manager.exe`.
+
+### Publish a Windows download
+
+1. Build the executable on Windows with `build_exe.bat`.
+2. Open the repository’s [Releases page](https://github.com/jaberDevHub/AEGIS---Download-Manager/releases) and choose **Draft a new release**.
+3. Create a tag such as `v1.0.0`, enter a release title and notes, and attach `dist\Aegis Download Manager.exe`.
+4. Rename the built file to `Aegis-Download-Manager.exe` before uploading it, so the README’s direct download link matches.
+5. Publish the release. GitHub will serve the attached executable through the direct link above; no website deployment is needed.
 
 Designed as a zero-telemetry, zero-backend, fully independent alternative without trial countdowns, activation servers, or licensing restrictions.
 
