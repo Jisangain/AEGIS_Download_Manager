@@ -8,9 +8,9 @@ The extension requests access across sites and observes browser download/media a
 
 ## Review performed
 
-On 2026-10-28, a source-level review examined download transport, URL and message handling, filename/path use, process invocation, Defender scanning, archive extraction, IPC, extension DOM insertion, and dependency/build configuration. The detailed findings below were verified against the audited revision `901d85d`. The current checkout was rolled back to `b58e020`; that revision does not contain the security code changes or focused regression test file described by the audit. Therefore, the fixes below are historical and must not be treated as present in the current checkout or its builds. See [`docs/audits/security_best_practices_report.md`](docs/audits/security_best_practices_report.md).
+On 2026-10-28, a source-level review examined download transport, URL and message handling, filename/path use, process invocation, Defender scanning, archive extraction, IPC, extension DOM insertion, and dependency/build configuration. The detailed findings and regression evidence below were recorded against audited revision `901d85d`. The subsequent GitHub `main` revision merged here contains the corresponding security fixes and tests. This merge has not been re-tested or used to rebuild a release. See [`docs/audits/security_best_practices_report.md`](docs/audits/security_best_practices_report.md).
 
-The following checks were recorded for the audited revision, not the current rolled-back checkout:
+The following checks were recorded for the audited revision; they were not rerun as part of this merge:
 
 - `python -m unittest test_security -v`: 7 focused security regression tests passed, including ZIP/TAR traversal rejection, TAR link rejection, normal ZIP extraction, Defender invocation/result handling, and aria2 certificate-validation configuration.
 - `python test_file_management_automation.py`: 4 existing automation checks passed. The test output included a Defender result marked as flagged for its test input; this does not establish that a real malicious file was detected.
@@ -28,7 +28,7 @@ These are source and regression checks, not a complete penetration test. They do
 | AEGIS-SEC-003 | Medium | A Defender fallback previously embedded a file path in PowerShell source. | **Fixed.** The path is passed as an environment value and read as data. A regression test covers a path containing an apostrophe and verifies it is absent from the command string. |
 | AEGIS-SEC-004 | Medium | Unexpected Defender exit codes could be presented as a clean scan; the fallback also made an unverified clean claim. | **Fixed.** Only the expected clean result is reported as clean; unknown/error results are inconclusive, and the fallback no longer claims verification. Focused tests cover these cases. |
 
-The fixes above were present in the audited revision. They are absent from the current rolled-back checkout unless independently re-applied and verified. Their presence in a past revision does not mean a release containing them has been published.
+The fixes above were present in the audited revision and are included in the GitHub `main` changes merged here. This merge has not been independently re-tested, and these changes are not necessarily present in a published release.
 
 ## Remaining risks and unverified areas
 

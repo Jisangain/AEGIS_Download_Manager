@@ -60,6 +60,7 @@ def find_tool_binary(tool_name: str, custom_path: str = "") -> Optional[str]:
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"),
         os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "tools"),
         os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "..", "tools"),
+        os.path.join(getattr(sys, "_MEIPASS", ""), "tools"),
         r"E:\reverse\AegisDownloadManager\tools",
         r"E:\reverse\AegisDownloadManager\dist\tools",
         r"E:\reverse\VnA Download Manager\_internal\tools",
@@ -75,6 +76,18 @@ def find_tool_binary(tool_name: str, custom_path: str = "") -> Optional[str]:
     if found:
         return os.path.abspath(found)
     return None
+
+
+def get_yt_dlp_runtime_options() -> Dict[str, Any]:
+    """Select the bundled compact QuickJS runtime, with Deno as a fallback."""
+    quickjs_bin = find_tool_binary("qjs")
+    if quickjs_bin:
+        return {"js_runtimes": {"quickjs": {"path": quickjs_bin}}}
+
+    deno_bin = find_tool_binary("deno")
+    if deno_bin:
+        return {"js_runtimes": {"deno": {"path": deno_bin}}}
+    return {}
 
 
 def prevent_sleep():
@@ -154,10 +167,6 @@ class UrlAnalyzerThread(QThread):
         is_stream = is_media_stream_url(self.url)
         if yt_dlp is not None and (is_stream or not has_direct_ext):
             try:
-                deno_bin = find_tool_binary("deno", self.tools.get("deno_path", ""))
-                if deno_bin:
-                    os.environ["PATH"] = os.path.dirname(deno_bin) + os.pathsep + os.environ.get("PATH", "")
-
                 ydl_opts = {
                     "quiet": True,
                     "no_warnings": True,
@@ -165,6 +174,7 @@ class UrlAnalyzerThread(QThread):
                     "skip_download": True,
                     "noplaylist": True
                 }
+                ydl_opts.update(get_yt_dlp_runtime_options())
                 ffmpeg_bin = find_tool_binary("ffmpeg", self.tools.get("ffmpeg_path", ""))
                 if ffmpeg_bin:
                     ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
@@ -243,6 +253,8 @@ class UrlAnalyzerThread(QThread):
                             if vf["sz"] > 0:
                                 mb = vf["sz"] / (1024 * 1024)
                                 parts.append(f"~{mb:.1f} MB" if mb < 1024 else f"~{mb/1024:.2f} GB")
+                            if not vf["has_audio"] and not ffmpeg_bin:
+                                parts.append("FFmpeg required to merge audio")
 
                             label = " • ".join(parts)
                             fmt_id = f"{vf['fid']}/best" if vf["has_audio"] else f"{vf['fid']}+bestaudio/best"
@@ -396,7 +408,7 @@ class Aria2Worker(BaseDownloadWorker):
             f"-x{self.connections}",
             "-k1M",
             "--file-allocation=none",
-            "--check-certificate=false",
+            "--check-certificate=true",
             "--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "--timeout=60",
             "--connect-timeout=30",
@@ -477,10 +489,6 @@ class YtDlpWorker(BaseDownloadWorker):
             self.status_signal.emit(self.task_id, "failed", "yt-dlp is not available")
             return
 
-        deno_bin = find_tool_binary("deno", self.tools.get("deno_path", ""))
-        if deno_bin:
-            os.environ["PATH"] = os.path.dirname(deno_bin) + os.pathsep + os.environ.get("PATH", "")
-
         os.makedirs(self.save_dir, exist_ok=True)
         if self.filename and not self.filename.startswith("download"):
             base_name, _ = os.path.splitext(self.filename)
@@ -517,6 +525,7 @@ class YtDlpWorker(BaseDownloadWorker):
             "format": self.format_id or "bestvideo+bestaudio/best",
             "noplaylist": True
         }
+        ydl_opts.update(get_yt_dlp_runtime_options())
 
         if self.max_speed_kbs > 0:
             ydl_opts["ratelimit"] = self.max_speed_kbs * 1024
@@ -537,8 +546,14 @@ class YtDlpWorker(BaseDownloadWorker):
                     "preferredquality": "192",
                 }]
         elif "+" in self.format_id:
-            # If FFmpeg is missing, prefer single container format to avoid unmerged streams
-            ydl_opts["format"] = "best[ext=mp4]/best"
+            self.status_signal.emit(
+                self.task_id,
+                "failed",
+                "This selected quality has separate video and audio streams, but FFmpeg was not found. "
+                "Install FFmpeg or set its executable path in Settings, then retry. "
+                "Aegis stopped instead of silently downloading a lower resolution."
+            )
+            return
 
         try:
             self.status_signal.emit(self.task_id, "downloading", "")

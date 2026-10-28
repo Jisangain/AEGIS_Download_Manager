@@ -5,8 +5,8 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from playwright.sync_api import sync_playwright
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXT_DIR = os.path.join(ROOT_DIR, "browser_extension")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXT_DIR = os.path.join(REPO_ROOT, "browser_extension")
 
 TEST_HTML = """
 <!DOCTYPE html>

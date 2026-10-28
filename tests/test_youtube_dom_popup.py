@@ -10,8 +10,8 @@ import json
 import time
 from playwright.sync_api import sync_playwright
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXT_DIR = os.path.join(ROOT_DIR, "browser_extension")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXT_DIR = os.path.join(REPO_ROOT, "browser_extension")
 CONTENT_JS_PATH = os.path.join(EXT_DIR, "content.js")
 CONTENT_CSS_PATH = os.path.join(EXT_DIR, "content.css")
 
@@ -123,7 +123,7 @@ def run_test():
             print("   -", opt.inner_text().replace("\n", " | "))
 
         # Take screenshot of the open popup for visual verification
-        screenshot_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "youtube_dom_popup_screenshot.png"))
+        screenshot_path = os.path.join(REPO_ROOT, "tests", "assets", "youtube_dom_popup_screenshot.png")
         page.screenshot(path=screenshot_path)
         print(f"PASS: Saved visual screenshot to: {screenshot_path}")
 

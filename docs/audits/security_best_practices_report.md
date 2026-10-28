@@ -5,7 +5,7 @@
 
 ## Summary
 
-The audit revision found four issues and implemented fixes, with seven focused regression tests passing at that revision. A crafted TAR archive was confirmed to write outside the selected extraction directory before the fix. **Historical status:** the repository was subsequently rolled back to `b58e020`, before these implementation and test changes. The findings below describe the audited revision, not the current source tree; do not infer that the current executable includes these fixes.
+The audit revision found four issues and implemented fixes, with seven focused regression tests passing at that revision. A crafted TAR archive was confirmed to write outside the selected extraction directory before the fix. **Historical status:** these findings and test results describe revision `901d85d`. The corresponding fixes and regression tests are present in the GitHub `main` changes merged into the current branch, but this merge has not been independently re-tested and no claim is made about which published executable contains them.
 
 ## Findings
 
