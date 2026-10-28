@@ -48,12 +48,12 @@ AegisDownloadManager/
 ├── database.py                 # SQLite database & configuration manager
 ├── ipc_server.py               # Named pipe IPC server for browser integration
 ├── aegis_host.py               # Native Messaging host bridge for Chrome & Edge
+├── setup_windows.bat           # Installs Python, project dependencies, and FFmpeg, then launches Aegis
 ├── build_exe.bat               # Standalone Windows executable packager
 ├── build_linux.sh              # Standalone Linux executable packager
 ├── ipc_transport.py            # Cross-platform IPC client for the app and browser host
 ├── platform_paths.py           # Per-platform application data paths
-├── validate_e2e.py             # Full end-to-end regression validation test suite
-├── test_new_features.py        # Automated test suite for new features
+├── tests/                      # Automated test and validation scripts
 ├── requirements.txt            # Python dependencies
 └── browser_extension/          # Independent Chrome/Edge extension
     ├── manifest.json           # Manifest V3 extension configuration
@@ -72,6 +72,11 @@ AegisDownloadManager/
 - Python 3.10+
 - PyQt6
 - yt-dlp
+
+### Windows: fresh setup
+From the extracted repository folder, double-click `setup_windows.bat`. It uses an existing Python 3.10+ installation or downloads the SHA-256-verified Python 3.13.17 installer, creates a project virtual environment, downloads and verifies FFmpeg into `tools/`, installs `requirements.txt`, and launches Aegis. The FFmpeg archive is about 109 MB. It does not require administrator access. Internet access is needed for first setup.
+
+### Linux or manual setup
 
 ### 1. Install Dependencies
 ```bash
