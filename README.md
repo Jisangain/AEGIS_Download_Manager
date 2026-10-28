@@ -71,6 +71,14 @@ AegisDownloadManager/
 
 ### Windows: fresh setup
 
+**Just double-click `setup_windows.bat`** — it handles everything for you. You do **not** need to manually install Python, run `pip`, configure `PATH`, or use the command prompt. The script automatically:
+
+- Detects or installs Python 3.10+
+- Creates a virtual environment
+- Downloads and verifies FFmpeg
+- Installs Python dependencies from `requirements.txt`
+- Launches Aegis
+
 From the extracted repository folder, double-click `setup_windows.bat`. The script performs the following steps:
 
 1. **Python detection** — Checks for an existing Python 3.10+ installation (via a project `.venv`, the `py.exe` launcher, or `python.exe` on `PATH`, excluding Microsoft Store stubs).
