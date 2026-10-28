@@ -26,4 +26,11 @@ pyinstaller --noconsole --onefile ^
 
 echo.
 echo Build finished! The executable is located in: dist\Aegis Download Manager.exe
+echo Updating the website download copy...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0sync_website_release.ps1"
+if %errorlevel% neq 0 (
+    echo Website download sync failed. Check the error above.
+    pause
+    exit /b 1
+)
 pause

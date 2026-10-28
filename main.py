@@ -124,7 +124,8 @@ def main():
 
     # Set application & taskbar icon
     base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    icon_path = os.path.join(base_dir, "icon.ico")
+    icon_name = "icon.ico" if sys.platform == "win32" else "icon.png"
+    icon_path = os.path.join(base_dir, icon_name)
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 

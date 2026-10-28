@@ -10,14 +10,14 @@ import threading
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from platform_paths import app_data_directory
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
 class Database:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
-            os.makedirs(app_data, exist_ok=True)
+            app_data = app_data_directory()
             self.db_path = os.path.join(app_data, "aegis_downloads.db")
         else:
             self.db_path = db_path

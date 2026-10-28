@@ -11,10 +11,12 @@ import struct
 import json
 import time
 import subprocess
+import shutil
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from ipc_server import send_ipc_message, PIPE_NAME
+from ipc_transport import send_ipc_message, PIPE_NAME
+from platform_paths import app_data_directory
 
 if sys.platform == "win32":
     import msvcrt
@@ -32,8 +34,7 @@ else:
 def log_debug(msg: str):
     """Appends diagnostic information strictly to the log file, never stdout."""
     try:
-        app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
-        os.makedirs(app_data, exist_ok=True)
+        app_data = app_data_directory()
         with open(os.path.join(app_data, "aegis_host.log"), "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} - [HOST] {msg}\n")
     except Exception:
@@ -114,11 +115,19 @@ def find_aegis_executable() -> Optional[str]:
     else:
         host_dir = os.path.dirname(os.path.abspath(__file__))
 
+    if sys.platform == "win32":
+        application_names = ["Aegis Download Manager.exe"]
+    else:
+        application_names = ["aegis-download-manager", "Aegis Download Manager"]
     relative_candidates = [
-        os.path.join(host_dir, "Aegis Download Manager.exe"),
-        os.path.join(host_dir, "..", "Aegis Download Manager.exe"),
-        os.path.join(host_dir, "..", "dist", "Aegis Download Manager.exe"),
-        os.path.join(host_dir, "dist", "Aegis Download Manager.exe"),
+        os.path.join(directory, name)
+        for directory in (
+            host_dir,
+            os.path.join(host_dir, ".."),
+            os.path.join(host_dir, "..", "dist"),
+            os.path.join(host_dir, "dist"),
+        )
+        for name in application_names
     ]
     for cand in relative_candidates:
         norm = os.path.normpath(cand)
@@ -134,6 +143,11 @@ def find_aegis_executable() -> Optional[str]:
         norm = os.path.normpath(cand)
         if os.path.isfile(norm):
             return norm
+
+    if sys.platform != "win32":
+        installed_app = shutil.which("aegis-download-manager")
+        if installed_app:
+            return os.path.abspath(installed_app)
 
     return None
 
@@ -157,13 +171,18 @@ def launch_aegis(executable_path: str) -> bool:
         else:
             cmd = [executable_path]
 
-        flags = 0x00000208  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        p = subprocess.Popen(
-            cmd,
-            cwd=os.path.dirname(executable_path),
-            creationflags=flags,
-            close_fds=True
-        )
+        launch_options = {
+            "cwd": os.path.dirname(executable_path),
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            launch_options["creationflags"] = 0x00000208  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        else:
+            launch_options["start_new_session"] = True
+        p = subprocess.Popen(cmd, **launch_options)
         log_debug(f"Spawned Aegis process with Popen (PID {p.pid})")
         return True
     except Exception as e:

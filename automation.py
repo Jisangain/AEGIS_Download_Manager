@@ -117,6 +117,8 @@ def run_windows_defender_scan(filepath: str) -> tuple[bool, str]:
     """
     if not os.path.exists(filepath):
         return False, f"File does not exist: {filepath}"
+    if sys.platform != "win32":
+        return False, "Windows Defender scanning is available only on Windows."
 
     # Common locations for MpCmdRun.exe
     possible_paths = [

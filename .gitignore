@@ -84,3 +84,6 @@ yarn-error.log*
 web-ext-artifacts/
 *.crx
 *.pem
+
+# ---- Website deployment folder ----
+/Aegis-download-manager/

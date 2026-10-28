@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
     QCheckBox, QDateTimeEdit, QTextEdit, QStackedWidget, QFrame,
     QAbstractItemView, QStyledItemDelegate, QStyle
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime, QThread
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication, QShortcut
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QDateTime, QThread, QUrl
+from PyQt6.QtGui import QDesktopServices, QIcon, QFont, QColor, QAction, QKeySequence, QClipboard, QGuiApplication, QShortcut
 
 class NoFocusDelegate(QStyledItemDelegate):
     """Eliminates the dotted/dashed focus rectangle drawn on active table cells."""
@@ -74,6 +74,7 @@ def parse_eta_to_seconds(eta_str: str) -> int:
         return 999999999
 
 from database import Database
+from platform_paths import app_data_directory
 from engine import (
     UrlAnalyzerThread, Aria2Worker, YtDlpWorker, DirectHttpWorker,
     find_tool_binary, prevent_sleep, allow_sleep, is_media_stream_url
@@ -1084,6 +1085,7 @@ class SettingsDialog(QDialog):
         defender_layout = QHBoxLayout()
         self.defender_chk = QCheckBox("Auto-scan completed downloads with Windows Defender")
         self.defender_chk.setChecked(self.db.get_setting("auto_antivirus_scan", "false") == "true")
+        self.defender_chk.setVisible(sys.platform == "win32")
         defender_layout.addWidget(self.defender_chk)
         layout.addLayout(defender_layout)
 
@@ -1565,7 +1567,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Aegis Download Manager")
         self.resize(1080, 640)
         base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_dir, "icon.ico")
+        icon_name = "icon.ico" if sys.platform == "win32" else "icon.png"
+        icon_path = os.path.join(base_dir, icon_name)
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         self.db = Database()
@@ -2256,7 +2259,7 @@ class MainWindow(QMainWindow):
 
     def _process_pending_browser_queue(self):
         import json
-        app_data = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AegisDownloadManager")
+        app_data = app_data_directory()
         queue_file = os.path.join(app_data, "browser_queue.json")
         if os.path.exists(queue_file):
             try:
@@ -2903,10 +2906,7 @@ class MainWindow(QMainWindow):
             return
         file_path, folder_path = self._resolve_task_paths(task)
         if file_path and os.path.isfile(file_path):
-            try:
-                os.startfile(os.path.normpath(os.path.abspath(file_path)))
-            except Exception as e:
-                QMessageBox.warning(self, "Open File Failed", f"Could not open file:\n{e}")
+            self._open_desktop_path(file_path, "Open File Failed")
         else:
             st = task.get("status", "")
             if st in ("downloading", "queued", "paused", "scheduled"):
@@ -2924,14 +2924,28 @@ class MainWindow(QMainWindow):
         file_path, folder_path = self._resolve_task_paths(task)
         if file_path and os.path.isfile(file_path):
             norm_file = os.path.normpath(os.path.abspath(file_path))
-            try:
-                subprocess.Popen(f'explorer.exe /select,"{norm_file}"')
-            except Exception:
-                os.startfile(os.path.dirname(norm_file))
+            if sys.platform == "win32":
+                try:
+                    subprocess.Popen(["explorer.exe", f"/select,{norm_file}"])
+                except Exception:
+                    self._open_desktop_path(os.path.dirname(norm_file), "Open Folder Failed")
+            else:
+                self._open_desktop_path(os.path.dirname(norm_file), "Open Folder Failed")
         elif folder_path and os.path.isdir(folder_path):
-            os.startfile(os.path.normpath(os.path.abspath(folder_path)))
+            self._open_desktop_path(folder_path, "Open Folder Failed")
         else:
             QMessageBox.warning(self, "Folder Not Found", "Could not locate the download directory on disk.")
+
+    def _open_desktop_path(self, path: str, title: str):
+        normalized = os.path.normpath(os.path.abspath(path))
+        try:
+            if sys.platform == "win32":
+                os.startfile(normalized)
+                return
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(normalized)):
+                raise OSError("The desktop did not accept the file URL")
+        except Exception as exc:
+            QMessageBox.warning(self, title, f"Could not open path:\n{exc}")
 
     def _copy_selected_url(self):
         t_id = self._get_selected_task_id()
@@ -2996,15 +3010,12 @@ class MainWindow(QMainWindow):
 
         file_path, folder_path = self._resolve_task_paths(task)
         if file_path and os.path.isfile(file_path):
-            try:
-                os.startfile(os.path.normpath(os.path.abspath(file_path)))
-            except Exception as e:
-                QMessageBox.warning(self, "Open File Failed", f"Could not open file:\n{e}")
+            self._open_desktop_path(file_path, "Open File Failed")
         else:
             st = task.get("status", "")
             if st in ("downloading", "queued", "paused"):
                 if folder_path and os.path.isdir(folder_path):
-                    os.startfile(os.path.normpath(os.path.abspath(folder_path)))
+                    self._open_desktop_path(folder_path, "Open Folder Failed")
             else:
                 QMessageBox.information(self, "File Not Found", "The downloaded file does not exist on disk yet.")
 
@@ -3075,8 +3086,9 @@ class MainWindow(QMainWindow):
             chk_act = menu.addAction("Verify Checksum (MD5 / SHA256)...")
             chk_act.triggered.connect(lambda: self._open_checksum_dialog(file_path))
 
-            av_act = menu.addAction("Scan with Windows Defender")
-            av_act.triggered.connect(lambda: self._scan_defender_selected(file_path))
+            if sys.platform == "win32":
+                av_act = menu.addAction("Scan with Windows Defender")
+                av_act.triggered.connect(lambda: self._scan_defender_selected(file_path))
 
             if is_extractable_archive(file_path):
                 ext_act = menu.addAction("Extract Archive Here...")
