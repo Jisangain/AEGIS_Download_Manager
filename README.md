@@ -45,12 +45,12 @@ On Windows, run `build_exe.bat`. On Linux, create and activate a virtual environ
 
 ## Tests
 
-Run the focused security regression tests and existing feature checks from the repository root:
+Test and validation scripts are grouped in `tests/`. Run the focused security regression tests and existing feature checks from the repository root:
 
 ```bash
-python -m unittest test_security -v
-python test_new_features.py
-python test_file_management_automation.py
+python -m unittest tests.test_security -v
+python -m tests.test_new_features
+python -m tests.test_file_management_automation
 ```
 
 ## Security

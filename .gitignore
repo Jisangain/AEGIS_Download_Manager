@@ -53,6 +53,7 @@ venv.bak/
 *.zip
 
 # ---- Test / scratch ----
+trash/
 test_cli/
 test_pkg_dl/
 .pytest_cache/
