@@ -62,52 +62,30 @@ AegisDownloadManager/
 
 ---
 
-## Setup & Running from Source
+## Install on Windows
 
-### Prerequisites
-- Python 3.10+
-- PyQt6
-- yt-dlp
+Install [Git for Windows](https://git-scm.com/download/win), then open Command Prompt or PowerShell and run:
 
-### Windows: fresh setup
-
-**Just double-click `setup_windows.bat`** — it handles everything for you. You do **not** need to manually install Python, run `pip`, configure `PATH`, or use the command prompt. The script automatically:
-
-- Detects or installs Python 3.10+
-- Creates a virtual environment
-- Downloads and verifies FFmpeg
-- Installs Python dependencies from `requirements.txt`
-- Launches Aegis
-
-From the extracted repository folder, double-click `setup_windows.bat`. The script performs the following steps:
-
-1. **Python detection** — Checks for an existing Python 3.10+ installation (via a project `.venv`, the `py.exe` launcher, or `python.exe` on `PATH`, excluding Microsoft Store stubs).
-2. **Python installation (if needed)** — If no suitable Python is found, downloads the official Python 3.13.17 installer from python.org and verifies its SHA-256 hash (`5da012101ba2e17113a9a1cd901e9ce1441086f2b7ecb5de06ec94163899a190`), then installs it silently to `%LOCALAPPDATA%\Programs\Python\Python313` without administrator access.
-3. **Virtual environment** — Creates a project virtual environment at `.venv` (or `.venv-aegis` if `.venv` exists but fails version validation).
-4. **FFmpeg installation** — If `tools/ffmpeg.exe` is missing or invalid, downloads the FFmpeg Windows essentials build from gyan.dev, verifies its SHA-256 checksum, extracts `ffmpeg.exe` into `tools/`, and confirms it runs. The FFmpeg archive is about 109 MB.
-5. **Python dependencies** — Upgrades `pip`, then installs packages from `requirements.txt`.
-6. **Launch** — Runs `main.py` from the project virtual environment.
-
-It does not require administrator access. Internet access is needed for the first setup (Python installer, FFmpeg archive, and Python packages).
-
-### Linux or manual setup
-
-### 1. Install Dependencies
-```bash
-pip install -r requirements.txt
+```powershell
+git clone https://github.com/jaberDevHub/AEGIS_Download_Manager.git
+cd AEGIS_Download_Manager
+.\setup_windows.bat
 ```
 
-### 2. External Tools
-The application automatically checks for `aria2c` and `ffmpeg` (use `.exe` versions on Windows):
-- If in system `PATH`, Aegis detects them automatically on both platforms.
-- Alternatively, configure custom paths in **Settings (⚙)** in the UI.
-- If `aria2c` is absent, Aegis automatically falls back to its built-in chunked HTTP downloader.
+The setup script installs or locates Python, downloads FFmpeg, installs the required packages, and launches Aegis. Keep an internet connection during setup.
 
-### 3. Run the Application
+To update later, open the project folder and run `git pull --ff-only origin main`, then run `setup_windows.bat` again.
+
+## Run from source on Linux
+
+Install Python 3.10+, then run:
+
 ```bash
-python -m pip install -r requirements.txt
-python main.py
+python3 -m pip install -r requirements.txt
+python3 main.py
 ```
+
+FFmpeg is needed to merge separate high-resolution video and audio streams. Install it with your Linux package manager if it is not already available.
 
 For CLI use:
 
