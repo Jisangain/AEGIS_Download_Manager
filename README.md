@@ -2,6 +2,11 @@
 
 A clean, modular, and high-performance desktop download manager built with **PyQt6**, **aria2c**, and **yt-dlp**. The Python app supports Windows and Linux; platform installers are built separately on each operating system.
 
+## Direct Download
+
+- **Windows 64-bit:** [Download Aegis Download Manager](https://aegis-download-manager.vercel.app/downloads/Aegis-Download-Manager.exe) (standalone `.exe`, no release package required)
+- **Linux:** Build from source using the [Linux instructions](#linux-build-and-browser-integration). A prebuilt Linux download is not available yet.
+
 Designed as a zero-telemetry, zero-backend, fully independent alternative without trial countdowns, activation servers, or licensing restrictions.
 
 ---
