@@ -9,10 +9,12 @@ Handles:
 """
 
 import os
+import ntpath
 import re
 import sys
 import shutil
 import hashlib
+import stat
 import zipfile
 import tarfile
 import subprocess
@@ -143,12 +145,24 @@ def run_windows_defender_scan(filepath: str) -> tuple[bool, str]:
 
     if not mp_exe:
         # Fallback to powershell Start-MpScan
-        ps_cmd = f"Start-MpScan -ScanPath '{filepath}' -ScanType Custom -ErrorAction SilentlyContinue"
+        # Pass the target through the environment so path text is never parsed as PowerShell code.
+        ps_cmd = (
+            "$ErrorActionPreference = 'Stop'; "
+            "try { Start-MpScan -ScanPath $env:AEGIS_SCAN_TARGET "
+            "-ScanType Custom -ErrorAction Stop; exit 0 } catch { exit 1 }"
+        )
+        scan_env = os.environ.copy()
+        scan_env["AEGIS_SCAN_TARGET"] = os.path.abspath(filepath)
         try:
-            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], 
-                                 capture_output=True, text=True, timeout=60)
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=scan_env,
+            )
             if res.returncode == 0:
-                return True, "PowerShell Defender scan completed. No threats detected."
+                return False, "Defender scan ran, but this fallback cannot verify whether threats were found."
             return False, f"PowerShell scan returned code {res.returncode}"
         except Exception as e:
             return False, f"Defender scanner executable not found ({e})"
@@ -163,7 +177,7 @@ def run_windows_defender_scan(filepath: str) -> tuple[bool, str]:
         elif res.returncode == 2:
             return False, "THREAT DETECTED: Windows Defender flagged this file!"
         else:
-            return True, f"Defender finished (code {res.returncode}): {res.stdout.strip()[:100]}"
+            return False, f"Defender scan result is inconclusive (code {res.returncode})."
     except subprocess.TimeoutExpired:
         return False, "Defender scan timed out."
     except Exception as e:
@@ -176,10 +190,48 @@ def is_extractable_archive(filepath: str) -> bool:
     return ext in [".zip", ".tar", ".gz", ".bz2", ".xz", ".tgz"]
 
 
+def _archive_path_is_within(root: str, path: str) -> bool:
+    """Compare path components, avoiding unsafe string-prefix containment checks."""
+    try:
+        common = os.path.commonpath((root, path))
+    except (OSError, ValueError):
+        return False
+    return os.path.normcase(common) == os.path.normcase(root)
+
+
+def _archive_member_target(root: str, member_name: str) -> str:
+    """Resolve a ZIP/TAR member while rejecting traversal and cross-platform absolute paths."""
+    if not isinstance(member_name, str) or not member_name or "\x00" in member_name:
+        raise ValueError("Archive contains an invalid member path.")
+    if member_name.startswith(("/", "\\")) or ntpath.splitdrive(member_name)[0]:
+        raise ValueError("Archive contains an absolute member path.")
+
+    # Treat both separators as path separators so Windows-style traversal is rejected on Linux too.
+    parts = [part for part in member_name.replace("\\", "/").split("/") if part not in ("", ".")]
+    if any(part == ".." for part in parts):
+        raise ValueError("Archive contains a parent-directory traversal path.")
+
+    target = os.path.abspath(os.path.join(root, *parts)) if parts else root
+    if not _archive_path_is_within(root, target):
+        raise ValueError("Archive member resolves outside the extraction directory.")
+    return target
+
+
+def _verify_archive_target(root: str, target: str) -> None:
+    """Reject existing symlink parents/targets that could redirect extraction outside root."""
+    if os.path.normcase(os.path.abspath(target)) == os.path.normcase(root):
+        return
+    parent = os.path.realpath(os.path.dirname(target))
+    if not _archive_path_is_within(root, parent):
+        raise ValueError("Extraction path traverses a symlink outside the destination.")
+    if os.path.islink(target):
+        raise ValueError("Extraction would overwrite a symbolic link.")
+
+
 def extract_archive_safe(filepath: str, destination_dir: Optional[str] = None) -> tuple[bool, str]:
     """
     Safely extracts a supported archive into destination_dir (or a subfolder next to archive).
-    Includes directory traversal protection (Zip Slip prevention).
+    Rejects traversal, link entries, and special TAR members before writing files.
     """
     if not os.path.exists(filepath):
         return False, f"Archive not found: {filepath}"
@@ -188,26 +240,52 @@ def extract_archive_safe(filepath: str, destination_dir: Optional[str] = None) -
         base_name = os.path.splitext(os.path.basename(filepath))[0]
         destination_dir = os.path.join(os.path.dirname(filepath), f"{base_name}_extracted")
 
-    os.makedirs(destination_dir, exist_ok=True)
-    real_dest = os.path.realpath(destination_dir)
-
     try:
+        os.makedirs(destination_dir, exist_ok=True)
+        real_dest = os.path.realpath(destination_dir)
+
         if zipfile.is_zipfile(filepath):
             with zipfile.ZipFile(filepath, "r") as zf:
+                planned = []
                 for member in zf.infolist():
-                    target_path = os.path.realpath(os.path.join(destination_dir, member.filename))
-                    if not target_path.startswith(real_dest):
-                        return False, "Extraction aborted: Directory traversal vulnerability detected in archive."
-                zf.extractall(destination_dir)
+                    target = _archive_member_target(real_dest, member.filename)
+                    unix_mode = member.external_attr >> 16
+                    if stat.S_ISLNK(unix_mode):
+                        raise ValueError("ZIP symbolic-link members are not allowed.")
+                    _verify_archive_target(real_dest, target)
+                    planned.append((member, target))
+
+                for member, target in planned:
+                    if member.is_dir():
+                        os.makedirs(target, exist_ok=True)
+                        continue
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    _verify_archive_target(real_dest, target)
+                    with zf.open(member, "r") as source, open(target, "wb") as output:
+                        shutil.copyfileobj(source, output)
             return True, f"Successfully extracted to: {destination_dir}"
 
         elif tarfile.is_tarfile(filepath):
             with tarfile.open(filepath, "r:*") as tf:
+                planned = []
                 for member in tf.getmembers():
-                    target_path = os.path.realpath(os.path.join(destination_dir, member.name))
-                    if not target_path.startswith(real_dest):
-                        return False, "Extraction aborted: Directory traversal vulnerability detected in archive."
-                tf.extractall(destination_dir)
+                    target = _archive_member_target(real_dest, member.name)
+                    if not (member.isdir() or member.isfile()):
+                        raise ValueError("TAR links and special-file members are not allowed.")
+                    _verify_archive_target(real_dest, target)
+                    planned.append((member, target))
+
+                for member, target in planned:
+                    if member.isdir():
+                        os.makedirs(target, exist_ok=True)
+                        continue
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    _verify_archive_target(real_dest, target)
+                    source = tf.extractfile(member)
+                    if source is None:
+                        raise ValueError("Could not read a regular file from the TAR archive.")
+                    with source, open(target, "wb") as output:
+                        shutil.copyfileobj(source, output)
             return True, f"Successfully extracted to: {destination_dir}"
 
         else:
